@@ -72,3 +72,8 @@ export async function pasteImage(imageData: number[], mdPath: string): Promise<s
   if (!isTauri()) throw new Error("Paste requires Tauri runtime");
   return invoke<string>("paste_image", { imageData, mdPath });
 }
+
+export async function revealInFinder(path: string): Promise<void> {
+  if (!isTauri()) return;
+  return invoke<void>("reveal_in_finder", { path });
+}

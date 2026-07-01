@@ -134,7 +134,7 @@ function hideMarkDeco(view: EditorView): DecorationSet {
 
 export const pasteImagePlugin = (mdPath: string | null) =>
   EditorView.domEventHandlers({
-    paste(event: ClipboardEvent) {
+    paste(event: ClipboardEvent, view: EditorView) {
       if (!mdPath) return false;
       const items = event.clipboardData?.items;
       if (!items) return false;
@@ -150,17 +150,12 @@ export const pasteImagePlugin = (mdPath: string | null) =>
             try {
               const { pasteImage } = await import("../../../lib/ipc");
               const relPath = await pasteImage(data, mdPath);
-              const view = EditorView.findFromDOM(
-                document.querySelector(".cm-editor") as HTMLElement,
-              );
-              if (view) {
-                view.dispatch({
-                  changes: {
-                    from: view.state.selection.main.from,
-                    insert: `![](${relPath})`,
-                  },
-                });
-              }
+              view.dispatch({
+                changes: {
+                  from: view.state.selection.main.from,
+                  insert: `![](${relPath})`,
+                },
+              });
             } catch {
               // clipboard paste not available
             }

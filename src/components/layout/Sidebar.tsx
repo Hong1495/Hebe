@@ -1,6 +1,6 @@
 import { readTextFile as tauriReadTextFile } from "@tauri-apps/plugin-fs";
 import { useEffect, useState } from "react";
-import { type FileEntry, listDirectory } from "../../lib/ipc";
+import { type FileEntry, listDirectory, revealInFinder } from "../../lib/ipc";
 import { useAppStore } from "../../stores/app-store";
 
 export function Sidebar() {
@@ -108,13 +108,7 @@ export function Sidebar() {
                     menu.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;z-index:9999;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:4px;min-width:160px;box-shadow:0 4px 12px rgba(0,0,0,0.15);`;
                     const items: [string, () => void][] = [
                       ["Open", () => handleFileClick(f)],
-                      [
-                        "Reveal in Finder",
-                        async () => {
-                          const { invoke } = await import("@tauri-apps/api/core");
-                          invoke("reveal_in_finder", { path: f.path }).catch(() => {});
-                        },
-                      ],
+                      ["Reveal in Finder", () => revealInFinder(f.path).catch(() => {})],
                     ];
                     items.forEach(([label, action]) => {
                       const btn = document.createElement("button");
