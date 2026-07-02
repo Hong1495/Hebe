@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { isThemePreference, THEME_STORAGE_KEY, type ThemePreference } from "../lib/theme";
 
 interface TabState {
   path: string | null; // null = unsaved new document
@@ -14,7 +15,7 @@ interface AppState {
   outlineWidth: number;
   focusMode: boolean;
   typewriterMode: boolean;
-  theme: "light" | "dark" | "sepia";
+  theme: ThemePreference;
   zoom: number;
 
   // Tab management
@@ -36,7 +37,7 @@ interface AppState {
   setOutlineWidth: (width: number) => void;
   toggleFocusMode: () => void;
   toggleTypewriterMode: () => void;
-  setTheme: (theme: "light" | "dark" | "sepia") => void;
+  setTheme: (theme: ThemePreference) => void;
   setZoom: (zoom: number) => void;
   resetZoom: () => void;
   zoomIn: () => void;
@@ -59,9 +60,14 @@ interface AppState {
 }
 
 const readStoredTheme = (): AppState["theme"] => {
-  if (typeof localStorage === "undefined") return "light";
-  const value = localStorage.getItem("hebe.theme");
-  return value === "dark" || value === "sepia" || value === "light" ? value : "light";
+  if (typeof localStorage === "undefined") return "system";
+  const value = localStorage.getItem(THEME_STORAGE_KEY);
+  if (isThemePreference(value)) return value;
+  if (value === "sepia") {
+    localStorage.setItem(THEME_STORAGE_KEY, "light");
+    return "light";
+  }
+  return "system";
 };
 
 const readStoredRecentFiles = (): string[] => {
@@ -114,7 +120,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   toggleFocusMode: () => set((s) => ({ focusMode: !s.focusMode })),
   toggleTypewriterMode: () => set((s) => ({ typewriterMode: !s.typewriterMode })),
   setTheme: (theme) => {
-    if (typeof localStorage !== "undefined") localStorage.setItem("hebe.theme", theme);
+    if (typeof localStorage !== "undefined") localStorage.setItem(THEME_STORAGE_KEY, theme);
     set({ theme });
   },
   setZoom: (zoom) => {

@@ -1,5 +1,6 @@
 import { Minus, Monitor, Plus, Type, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import type { ThemePreference } from "../../lib/theme";
 import { useAppStore } from "../../stores/app-store";
 
 interface SettingsDialogProps {
@@ -31,14 +32,19 @@ export function SettingsDialog({ open }: SettingsDialogProps) {
   }, [open, toggleSettings]);
 
   const themes: {
-    id: "light" | "dark" | "sepia";
+    id: ThemePreference;
     label: string;
     previewBackground: string;
     previewInk: string;
   }[] = [
+    {
+      id: "system",
+      label: "System",
+      previewBackground: "linear-gradient(90deg, #ffffff 0 50%, #1e1e1e 50%)",
+      previewInk: "#3b82f6",
+    },
     { id: "light", label: "Light", previewBackground: "#ffffff", previewInk: "#1f2937" },
     { id: "dark", label: "Dark", previewBackground: "#1e1e1e", previewInk: "#f4f4f5" },
-    { id: "sepia", label: "Sepia", previewBackground: "#fbf0d9", previewInk: "#5b4636" },
   ];
 
   if (!open) return null;

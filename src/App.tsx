@@ -10,14 +10,14 @@ import { Sidebar } from "./components/layout/Sidebar";
 import { StatusBar } from "./components/layout/StatusBar";
 import { TabBar } from "./components/layout/TabBar";
 import { isTauriRuntime, readMarkdownFile, takePendingOpenFiles } from "./lib/ipc";
+import { useResolvedTheme } from "./lib/use-resolved-theme";
 import { useAppStore } from "./stores/app-store";
 
 const MARKDOWN_FILE_RE = /\.(md|markdown|mdx|mkd|mkdn)$/i;
 
-const WINDOW_BACKGROUND: Record<"light" | "dark" | "sepia", string> = {
+const WINDOW_BACKGROUND: Record<"light" | "dark", string> = {
   light: "#ffffff",
   dark: "#1e1e1e",
-  sepia: "#fbf0d9",
 };
 
 function App() {
@@ -33,25 +33,26 @@ function App() {
   const recentFiles = useAppStore((s) => s.recentFiles);
   const setRecentFiles = useAppStore((s) => s.setRecentFiles);
   const theme = useAppStore((s) => s.theme);
+  const resolvedTheme = useResolvedTheme(theme);
   const zoom = useAppStore((s) => s.zoom);
   const editorViewRef = useRef<EditorView | null>(null);
 
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    document.documentElement.style.colorScheme = theme === "dark" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", resolvedTheme);
+    document.documentElement.style.colorScheme = resolvedTheme;
     if (!isTauriRuntime()) return;
     try {
-      const nativeTheme = theme === "dark" ? "dark" : "light";
+      const nativeTheme = theme === "system" ? null : resolvedTheme;
       const currentWindow = getCurrentWindow();
       void Promise.allSettled([
         currentWindow.setTheme(nativeTheme),
-        currentWindow.setBackgroundColor(WINDOW_BACKGROUND[theme]),
+        currentWindow.setBackgroundColor(WINDOW_BACKGROUND[resolvedTheme]),
         setAppTheme(nativeTheme),
       ]);
     } catch {
       // ignore unsupported window theme calls
     }
-  }, [theme]);
+  }, [theme, resolvedTheme]);
 
   useEffect(() => {
     document.documentElement.style.setProperty("--editor-zoom", String(zoom / 100));

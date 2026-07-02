@@ -644,8 +644,19 @@ export const hybridBaseTheme = EditorView.baseTheme({
   },
   "&.cm-editor": {
     height: "100%",
-    color: "var(--text)",
+    color: "var(--md-text)",
     background: "var(--bg)",
+  },
+  "&.cm-editor .cm-cursor": {
+    borderLeftColor: "var(--accent)",
+  },
+  "&.cm-editor .cm-selectionBackground, &.cm-editor.cm-focused .cm-selectionBackground": {
+    backgroundColor: "var(--select-bg)",
+  },
+  "&.cm-editor .cm-gutters": {
+    color: "var(--text-secondary)",
+    backgroundColor: "var(--bg)",
+    border: "0",
   },
   "&.cm-editor .cm-scroller": {
     fontFamily: "var(--font-sans)",
@@ -671,87 +682,87 @@ export const hybridBaseTheme = EditorView.baseTheme({
   ".md-heading-1": {
     fontSize: "1.85em",
     fontWeight: "700",
-    color: "var(--text-heading)",
+    color: "var(--md-heading)",
   },
   ".md-heading-2": {
     fontSize: "1.38em",
     fontWeight: "650",
-    color: "var(--text-heading)",
+    color: "var(--md-heading)",
   },
   ".md-heading-3": {
     fontSize: "1.18em",
     fontWeight: "620",
-    color: "var(--text-heading)",
+    color: "var(--md-heading)",
   },
   ".md-heading": {
     fontWeight: "600",
-    color: "var(--text-heading)",
+    color: "var(--md-heading)",
   },
   ".md-strong": {
     fontWeight: "700",
-    color: "var(--text-heading)",
+    color: "var(--md-strong)",
   },
   ".md-emphasis": {
     fontStyle: "italic",
   },
   ".md-link": {
-    color: "color-mix(in srgb, var(--accent) 76%, var(--text))",
+    color: "var(--md-link)",
     textDecoration: "none",
-    borderBottom: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)",
+    borderBottom: "1px solid var(--md-link-border)",
   },
   ".md-url": {
-    color: "var(--text-secondary)",
+    color: "var(--md-muted)",
   },
   ".md-code": {
     fontFamily: "var(--font-mono)",
     fontSize: "0.9em",
-    color: "var(--text-heading)",
-    background: "color-mix(in srgb, var(--code-bg) 78%, transparent)",
+    color: "var(--md-inline-code-text)",
+    background: "var(--md-inline-code-bg)",
     borderRadius: "4px",
     padding: "0 0.28em",
   },
   ".md-quote": {
-    color: "var(--text-secondary)",
+    color: "var(--md-quote-text)",
   },
   ".md-list": {
-    color: "var(--text-secondary)",
+    color: "var(--md-muted)",
   },
   ".md-list-line": {
-    color: "var(--text)",
+    color: "var(--md-text)",
   },
   ".cm-list-marker": {
     display: "inline-block",
     minWidth: "1.35em",
-    color: "var(--text-secondary)",
+    color: "var(--md-muted)",
     fontWeight: "500",
   },
   ".cm-list-marker.is-checked": {
-    color: "color-mix(in srgb, var(--accent) 72%, var(--text))",
+    color: "var(--md-link)",
   },
   ".md-mark": {
-    color: "var(--md-char-color)",
+    color: "var(--md-mark)",
   },
   ".md-strike": {
     textDecoration: "line-through",
-    color: "var(--text-secondary)",
+    color: "var(--md-muted)",
   },
   ".md-quote-line": {
-    color: "var(--text-secondary)",
-    borderLeft: "2px solid color-mix(in srgb, var(--accent) 30%, var(--border))",
+    color: "var(--md-quote-text)",
+    borderLeft: "2px solid var(--md-quote-border)",
     paddingLeft: "12px",
   },
   ".md-code-block-line": {
     fontFamily: "var(--font-mono)",
     fontSize: "0.92em",
-    color: "var(--text)",
+    color: "var(--md-code-block-text)",
   },
   ".md-code-fence-line": {
     fontFamily: "var(--font-mono)",
-    color: "var(--text-secondary)",
+    color: "var(--md-mark)",
   },
   ".md-rule-line": {
     color: "transparent",
-    borderTop: "1px solid color-mix(in srgb, var(--border) 76%, transparent)",
+    borderTop: "1px solid var(--md-rule)",
     transform: "translateY(0.8em)",
   },
   ".md-separator": {
@@ -763,25 +774,26 @@ export const hybridBaseTheme = EditorView.baseTheme({
     fontWeight: "700",
     marginTop: "0.9em",
     marginBottom: "0.45em",
-    color: "var(--text-heading)",
+    color: "var(--md-heading)",
   },
   ".cm-md-heading2": {
     fontSize: "1.38em",
     fontWeight: "600",
     marginTop: "0.8em",
     marginBottom: "0.35em",
-    color: "var(--text-heading)",
+    color: "var(--md-heading)",
   },
   ".cm-md-heading3": {
     fontSize: "1.18em",
     fontWeight: "600",
     marginTop: "0.6em",
     marginBottom: "0.2em",
-    color: "var(--text-heading)",
+    color: "var(--md-heading)",
   },
   // Bold
   ".cm-md-strong": {
     fontWeight: "700",
+    color: "var(--md-strong)",
   },
   // Italic
   ".cm-md-emphasis": {
@@ -791,7 +803,8 @@ export const hybridBaseTheme = EditorView.baseTheme({
   ".cm-md-monospace": {
     fontFamily: "var(--font-mono)",
     fontSize: "0.9em",
-    background: "color-mix(in srgb, var(--code-bg) 78%, transparent)",
+    color: "var(--md-inline-code-text)",
+    background: "var(--md-inline-code-bg)",
     borderRadius: "4px",
     padding: "0 0.28em",
   },
@@ -799,7 +812,8 @@ export const hybridBaseTheme = EditorView.baseTheme({
   ".cm-md-codeblock": {
     fontFamily: "var(--font-mono)",
     fontSize: "0.9em",
-    background: "color-mix(in srgb, var(--code-bg) 72%, transparent)",
+    color: "var(--md-code-block-text)",
+    background: "var(--md-code-block-bg)",
     padding: "0 14px",
   },
 });

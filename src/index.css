@@ -17,6 +17,7 @@
 /* ===== Light Theme (default) ===== */
 :root,
 [data-theme="light"] {
+  color-scheme: light;
   --bg: #ffffff;
   --surface: #f5f5f5;
   --border: #e5e7eb;
@@ -25,13 +26,28 @@
   --text-heading: #111827;
   --accent: #3b82f6;
   --accent-bg: rgba(59, 130, 246, 0.1);
-  --code-bg: #f3f4f6;
-  --md-char-color: #d1d5db;
   --select-bg: rgba(59, 130, 246, 0.15);
+  --md-text: #1f2937;
+  --md-heading: #111827;
+  --md-strong: #111827;
+  --md-muted: #6b7280;
+  --md-mark: #cbd5e1;
+  --md-link: #2563eb;
+  --md-link-border: rgba(37, 99, 235, 0.28);
+  --md-inline-code-text: #0f172a;
+  --md-inline-code-bg: #f1f5f9;
+  --md-code-block-text: #334155;
+  --md-code-block-bg: #f8fafc;
+  --md-quote-text: #64748b;
+  --md-quote-border: #bfdbfe;
+  --md-rule: #e2e8f0;
+  --md-table-header-bg: #f8fafc;
+  --md-table-row-bg: #f8fafc;
 }
 
 /* ===== Dark Theme ===== */
 [data-theme="dark"] {
+  color-scheme: dark;
   --bg: #1e1e1e;
   --surface: #252525;
   --border: #3e3e3e;
@@ -40,24 +56,23 @@
   --text-heading: #ffffff;
   --accent: #60a5fa;
   --accent-bg: rgba(96, 165, 250, 0.15);
-  --code-bg: #2d2d2d;
-  --md-char-color: #5a5a5a;
   --select-bg: rgba(96, 165, 250, 0.2);
-}
-
-/* ===== Sepia Theme ===== */
-[data-theme="sepia"] {
-  --bg: #fbf0d9;
-  --surface: #f4e4c1;
-  --border: #d6c8a8;
-  --text: #5b4636;
-  --text-secondary: #8c7a6b;
-  --text-heading: #3c2f20;
-  --accent: #b85c38;
-  --accent-bg: rgba(184, 92, 56, 0.12);
-  --code-bg: #eee0c0;
-  --md-char-color: #c4b896;
-  --select-bg: rgba(184, 92, 56, 0.18);
+  --md-text: #d4d4d8;
+  --md-heading: #f4f4f5;
+  --md-strong: #f4f4f5;
+  --md-muted: #a1a1aa;
+  --md-mark: #52525b;
+  --md-link: #93c5fd;
+  --md-link-border: rgba(147, 197, 253, 0.28);
+  --md-inline-code-text: #e5e7eb;
+  --md-inline-code-bg: #2f343a;
+  --md-code-block-text: #d4d4d8;
+  --md-code-block-bg: #252a30;
+  --md-quote-text: #a1a1aa;
+  --md-quote-border: #3b82f6;
+  --md-rule: #3f3f46;
+  --md-table-header-bg: #2b2f36;
+  --md-table-row-bg: #24272d;
 }
 
 * {
@@ -942,10 +957,10 @@ input:focus-visible {
   margin: 16px 0 22px;
   padding: 14px 16px;
   overflow: auto;
-  border: 1px solid color-mix(in srgb, var(--border) 34%, transparent);
+  border: 1px solid color-mix(in srgb, var(--md-rule) 72%, transparent);
   border-radius: 6px;
-  color: var(--text);
-  background: color-mix(in srgb, var(--code-bg) 74%, var(--bg));
+  color: var(--md-code-block-text);
+  background: var(--md-code-block-bg);
   font-family: var(--font-mono);
   font-size: 0.9em;
   line-height: 1.62;
@@ -977,7 +992,7 @@ input:focus-visible {
 .cm-mermaid-container {
   margin: 12px 0;
   padding: 16px;
-  background: var(--surface);
+  background: var(--md-code-block-bg);
   border-radius: 8px;
   text-align: center;
 }
@@ -985,7 +1000,7 @@ input:focus-visible {
 .cm-mermaid-code {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--text-secondary);
+  color: var(--md-muted);
   white-space: pre-wrap;
   text-align: left;
 }
@@ -1009,7 +1024,7 @@ input:focus-visible {
   min-width: max-content;
   border-collapse: collapse;
   border-spacing: 0;
-  color: var(--text);
+  color: var(--md-text);
   font-size: 0.92em;
   line-height: 1.55;
 }
@@ -1017,19 +1032,19 @@ input:focus-visible {
 .cm-markdown-table th,
 .cm-markdown-table td {
   padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border: 1px solid color-mix(in srgb, var(--md-rule) 86%, transparent);
   vertical-align: top;
   white-space: nowrap;
 }
 
 .cm-markdown-table th {
-  color: var(--text-heading);
-  background: color-mix(in srgb, var(--surface) 76%, var(--bg));
+  color: var(--md-heading);
+  background: var(--md-table-header-bg);
   font-weight: 650;
 }
 
 .cm-markdown-table tr:nth-child(even) td {
-  background: color-mix(in srgb, var(--surface) 34%, var(--bg));
+  background: var(--md-table-row-bg);
 }
 
 /* Focus Mode */

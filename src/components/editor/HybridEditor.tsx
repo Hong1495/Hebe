@@ -2,12 +2,10 @@ import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
-import { Compartment, EditorState, type Extension } from "@codemirror/state";
-import { oneDark } from "@codemirror/theme-one-dark";
+import { EditorState, type Extension } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { useEffect, useRef, useState } from "react";
-import { useAppStore } from "../../stores/app-store";
 import { blockWidgetPlugin } from "./extensions/block-widgets";
 import {
   clickRevealPlugin,
@@ -18,33 +16,6 @@ import {
   pasteImagePlugin,
   previewRevealRangeField,
 } from "./extensions/hybrid-preview";
-
-type ThemeKey = "light" | "dark" | "sepia";
-
-const sepiaHighlightStyle = HighlightStyle.define([
-  { tag: tags.heading1, class: "md-heading-1" },
-  { tag: tags.heading2, class: "md-heading-2" },
-  { tag: tags.heading3, class: "md-heading-3" },
-  { tag: tags.heading, class: "md-heading" },
-  { tag: tags.keyword, color: "#8b5e3c" },
-  { tag: tags.string, color: "#5d7a4a" },
-  { tag: tags.comment, color: "#a09080", fontStyle: "italic" },
-  { tag: tags.meta, color: "#b85c38" },
-  { tag: tags.link, class: "md-link" },
-  { tag: tags.url, class: "md-url" },
-  { tag: tags.emphasis, class: "md-emphasis" },
-  { tag: tags.strong, class: "md-strong" },
-  { tag: tags.monospace, class: "md-code" },
-  { tag: tags.quote, class: "md-quote" },
-  { tag: tags.list, class: "md-list" },
-  { tag: tags.atom, color: "#9b6b3c" },
-  { tag: tags.bool, color: "#a0522d" },
-  { tag: tags.number, color: "#8b5e3c" },
-  { tag: tags.name, color: "#3c2f20" },
-  { tag: tags.operator, color: "#7a6040" },
-  { tag: tags.regexp, color: "#5d7a4a" },
-  { tag: tags.url, color: "#6e5a3f", textDecoration: "underline" },
-]);
 
 const markdownHighlightStyle = HighlightStyle.define([
   { tag: tags.heading1, class: "md-heading-1" },
@@ -78,19 +49,6 @@ interface HybridEditorProps {
   mdPath?: string | null;
 }
 
-const themeCompartment = new Compartment();
-
-function themeExtension(key: ThemeKey): Extension {
-  switch (key) {
-    case "dark":
-      return [oneDark];
-    case "sepia":
-      return [syntaxHighlighting(sepiaHighlightStyle)];
-    default:
-      return [syntaxHighlighting(markdownHighlightStyle)];
-  }
-}
-
 export function HybridEditor({
   initialContent = "",
   onContentChange,
@@ -106,8 +64,6 @@ export function HybridEditor({
 }: HybridEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
-  const didMountThemeRef = useRef(false);
-  const theme = useAppStore((s) => s.theme);
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
@@ -175,7 +131,7 @@ export function HybridEditor({
 
       pasteImagePlugin(mdPath ?? null),
 
-      themeCompartment.of(themeExtension(theme)),
+      syntaxHighlighting(markdownHighlightStyle),
 
       updateContent,
     ];
@@ -193,17 +149,6 @@ export function HybridEditor({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    if (!didMountThemeRef.current) {
-      didMountThemeRef.current = true;
-      return;
-    }
-    if (!viewRef.current) return;
-    viewRef.current.dispatch({
-      effects: themeCompartment.reconfigure(themeExtension(theme)),
-    });
-  }, [theme]);
 
   useEffect(() => {
     const dom = viewRef.current?.dom;

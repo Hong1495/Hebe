@@ -5,6 +5,27 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Hebe</title>
+    <script>
+      (() => {
+        try {
+          const storedTheme = localStorage.getItem("hebe.theme");
+          const systemTheme = matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light";
+          const resolvedTheme =
+            storedTheme === "dark"
+              ? "dark"
+              : storedTheme === "light" || storedTheme === "sepia"
+                ? "light"
+                : systemTheme;
+          document.documentElement.dataset.theme = resolvedTheme;
+          document.documentElement.style.colorScheme = resolvedTheme;
+        } catch {
+          document.documentElement.dataset.theme = "light";
+          document.documentElement.style.colorScheme = "light";
+        }
+      })();
+    </script>
   </head>
   <body class="bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
     <div id="root"></div>
