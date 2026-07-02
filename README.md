@@ -1,4 +1,5 @@
 # Hebe
+![](assets/image-1782982434124.png)
 
 Hebe is a private Tauri 2 desktop Markdown editor. The product target is a
 clean, Typora-like writing surface: native menus, quiet chrome, direct file
@@ -40,6 +41,89 @@ The frontend owns editor state and interaction. The Rust side owns native shell
 integration, filesystem access, export/search commands, app menus, and macOS
 open/reopen behavior.
 
+```mermaid
+flowchart TB
+  subgraph Native["Tauri Native Layer"]
+    Menu["System Menu"]
+    Window["Window Lifecycle"]
+    OSOpen["OS Open / Drag Drop"]
+    IPC["Tauri IPC Commands"]
+    FS["File System"]
+    Export["Export / Search / Image"]
+  end
+
+  subgraph App["React App Shell"]
+    AppShell["App.tsx"]
+    Store["Zustand App Store"]
+    Tabs["Tab / Recent Files / Layout State"]
+    Theme["Theme / Zoom Sync"]
+  end
+
+  subgraph Layout["UI Layout"]
+    TabBar["TabBar"]
+    EditorArea["EditorArea"]
+    Sidebar["File Sidebar"]
+    Outline["Outline Panel"]
+    StatusBar["Status Bar"]
+    Settings["Settings Dialog"]
+    QuickOpen["Quick Open"]
+    GlobalSearch["Global Search"]
+  end
+
+  subgraph Kernel["Markdown Kernel"]
+    HybridEditor["HybridEditor"]
+    CM["CodeMirror 6 Document Model"]
+    InlinePreview["Inline Preview Decorations"]
+    Reveal["Preview Reveal Range"]
+    BlockWidgets["Editable Block Widgets"]
+  end
+
+  subgraph Blocks["Rendered Markdown Blocks"]
+    Code["Fenced Code"]
+    Mermaid["Mermaid"]
+    Math["KaTeX Math"]
+    Table["Markdown Table"]
+    Image["Local Image"]
+  end
+
+  Menu -->|menu-action| EditorArea
+  OSOpen --> AppShell
+  Window --> AppShell
+  AppShell --> Store
+  Store --> Tabs
+  Store --> Theme
+
+  AppShell --> TabBar
+  AppShell --> EditorArea
+  AppShell --> Sidebar
+  AppShell --> Outline
+  AppShell --> StatusBar
+  AppShell --> Settings
+
+  EditorArea --> QuickOpen
+  EditorArea --> GlobalSearch
+  EditorArea --> HybridEditor
+  EditorArea -->|read / write / export| IPC
+
+  IPC --> FS
+  IPC --> Export
+
+  HybridEditor --> CM
+  HybridEditor --> InlinePreview
+  HybridEditor --> Reveal
+  HybridEditor --> BlockWidgets
+
+  InlinePreview --> Reveal
+  BlockWidgets --> Reveal
+  BlockWidgets --> Code
+  BlockWidgets --> Mermaid
+  BlockWidgets --> Math
+  BlockWidgets --> Table
+  BlockWidgets --> Image
+
+  CM -->|source is canonical| Store
+  Store -->|active tab content| CM
+```
 ## Markdown Kernel
 
 The Markdown kernel is a CodeMirror 6 hybrid renderer. It does not convert the
