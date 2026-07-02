@@ -1,51 +1,126 @@
 # CLAUDE.md
 
-This is a Tauri 2 Markdown editor (Hebe). General principles: prefer simplicity, edit existing files, verify with tsc + cargo build.
+Hebe is a private Tauri 2 + React + CodeMirror Markdown editor. The product
+target is a clean, Typora-like desktop app: native menus, minimal chrome,
+resizable optional sidebars, and a hybrid Markdown engine that previews structure
+while preserving source-first editing.
 
-## Project structure
+## Non-negotiables
+
+- Preserve the Typora-like writing feel. The editor surface is primary; chrome,
+  tabs, sidebars, and status UI must stay quiet and compact.
+- Use native OS affordances where possible. App commands belong in the system
+  menu, not in large in-app toolbars.
+- Keep sidebars collapsed by default and resizable when visible.
+- Do not add landing-page or marketing-style UI inside the app.
+- Do not commit build outputs, dependencies, `.app`, `.dmg`, `dist`,
+  `node_modules`, or `src-tauri/target`.
+- The user tests releases from `/Applications/Hebe.app` and often keeps a copy
+  on the Desktop. Kill the running `hebe` process before replacing either app.
+
+## Project Structure
+
+```text
+src/
+  App.tsx                         App shell, theme sync, drag/open events
+  stores/app-store.ts             Zustand state: tabs, layout, theme, zoom, recent files
+  lib/ipc.ts                      Typed Tauri command wrappers
+  components/layout/              TabBar, EditorArea, Sidebar, OutlinePanel, StatusBar, Settings
+  components/editor/HybridEditor.tsx
+  components/editor/extensions/
+    hybrid-preview.ts             Inline WYSIWYG decorations and reveal logic
+    block-widgets.ts              Editable block widgets for code/math/table/image/Mermaid
+src-tauri/
+  src/lib.rs                      Tauri builder, menu, close/reopen/open-file lifecycle
+  src/commands/                   File, folder, export, search, image, reveal commands
 ```
-hebe/
-├── src/                  # React 19 + TypeScript + Vite frontend
-│   ├── components/editor/  # CodeMirror 6 Hybrid Editor
-│   ├── components/layout/  # App layout (EditorArea, Sidebar, OutlinePanel, TabBar, etc.)
-│   ├── stores/             # Zustand state management (TabState[] for multi-tab)
-│   ├── lib/ipc.ts          # Tauri IPC type-safe wrappers
-│   └── index.css           # Tailwind 4 + CSS variables (System/Light/Dark themes)
-├── src-tauri/            # Rust backend
-│   ├── src/commands/       # Tauri commands (file, dir, export, search, image, reveal)
-│   └── src/lib.rs          # Tauri Builder with plugin registration
-├── packages.json
-├── vite.config.ts
-├── biome.json
-└── tsconfig.json
-```
 
-## Key files
-- `src/stores/app-store.ts` — Zustand store: TabState[], currentFilePath(), currentContent(), openFile, closeTab, moveTab
-- `src/components/editor/HybridEditor.tsx` — CM6 React wrapper with Markdown highlighting, paste plugin, outline jump
-- `src/components/editor/extensions/hybrid-preview.ts` — Inline WYSIWYG decorations + pasteImagePlugin
-- `src/components/editor/extensions/block-widgets.ts` — KaTeX/Mermaid/Image block widgets
-- `src/components/layout/EditorArea.tsx` — Toolbar + TabBar + editor + auto-save + file watching + GlobalSearch + QuickOpen
-- `src/components/layout/TabBar.tsx` — Tab rendering with drag-to-reorder + right-click context menu
-- `src/components/layout/Sidebar.tsx` — File tree with subdirectory navigation + right-click context menu
+## Markdown Kernel
 
-## Check commands
+The editor is not a separate source pane plus HTML preview. CodeMirror owns the
+canonical Markdown document, and preview behavior is layered on top with
+decorations and widgets.
+
+Key files:
+
+- `HybridEditor.tsx` wires CodeMirror extensions, keymaps, theme highlighting,
+  paste handling, and block widget support.
+- `hybrid-preview.ts` hides Markdown markers in preview mode and reveals raw
+  source for the active line/range.
+- `block-widgets.ts` replaces larger blocks with editable widgets when they are
+  not revealed.
+
+Kernel rules:
+
+- Source text is always canonical.
+- Fenced code blocks are isolation boundaries; never run inline Markdown
+  scanners inside code fences.
+- Every block widget must reveal its original source range on click/keyboard
+  activation.
+- Click reveal for unrevealed text happens on `mousedown` to avoid transient
+  selection of adjacent widgets.
+- If a range is already revealed, let CodeMirror handle normal cursor movement
+  and text selection.
+- Avoid expensive full-document work. Scan linearly, skip known block ranges,
+  and keep inline scan length caps.
+
+Supported block widgets:
+
+- Fenced code blocks.
+- Mermaid fenced blocks.
+- KaTeX block math.
+- Markdown tables.
+- Local images resolved relative to the current Markdown file.
+
+Supported inline preview:
+
+- Headings, strong/emphasis/strike, links, inline code.
+- Block quotes, lists, task lists, horizontal rules.
+
+## Native Shell
+
+- Tauri menus are declared in `src-tauri/src/lib.rs` and emit `menu-action`.
+- `EditorArea.tsx` consumes menu actions for file operations, navigation,
+  settings, sidebars, focus/typewriter modes, and zoom.
+- Closing the window hides it instead of quitting.
+- macOS open/reopen events show/focus the window and pass Markdown paths to the
+  frontend.
+- Startup paths are queued through `take_pending_open_files`.
+
+## State Model
+
+- `app-store.ts` owns tabs, active tab index, dirty state, layout visibility,
+  sidebar widths, theme, zoom, folder path, and recent files.
+- `openFile` deduplicates by path and replaces the initial empty tab when safe.
+- `updateActiveContent` marks the active tab dirty.
+- Saved files auto-save after a short debounce; clean tabs can reload external
+  mtime changes.
+
+## Checks
+
+Run these before shipping meaningful changes:
+
 ```bash
-npx biome check --write src/       # Format + lint
-npx tsc -b                          # Type-check
-cargo build --manifest-path src-tauri/Cargo.toml  # Rust build
-npx vite build                      # Frontend production build
+npm run build
+cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
-## Rust dependencies
-- pulldown-cmark (0.12) — heading outline extraction
-- tantivy (0.22) — full-text search with in-memory index
-- Tauri plugins: dialog, fs, store, window-state, clipboard-manager, log
+For formatting specific frontend files:
 
-## Key patterns
-- Theme system: store keeps `system | light | dark`; App resolves `system` to `light | dark` and writes CSS `[data-theme="light/dark"]`
-- Markdown styling: keep internal `--md-*` semantic colors for light/dark readability; do not add separate Markdown theme choices unless the product scope changes
-- File watching: 2s poll `stat()` mtime, uses `setTabContent` to avoid dirty flag
-- Auto-save: 3s debounce via `dirtyRef`, only when `currentFilePath` exists
-- Search index: `static SEARCH_CACHE: Mutex<SearchCache>` — rebuilds only on folder change
-- Tab management: `openFile` deduplicates by path, replaces empty placeholder tab
+```bash
+npx biome format --write <files>
+```
+
+## Release Build
+
+```bash
+npm run tauri -- build --bundles app
+pkill -x hebe || true
+rm -rf /Applications/Hebe.app "$HOME/Desktop/Hebe.app"
+cp -R src-tauri/target/release/bundle/macos/Hebe.app /Applications/Hebe.app
+cp -R src-tauri/target/release/bundle/macos/Hebe.app "$HOME/Desktop/Hebe.app"
+```
+
+Current stripped macOS `.app` size is about 16 MB. Large frontend chunks mostly
+come from Mermaid and KaTeX; do not add new heavyweight rendering dependencies
+without a clear product reason.

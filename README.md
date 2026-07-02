@@ -1,32 +1,140 @@
-# React + TypeScript + Vite
+# Hebe
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Hebe is a private Tauri 2 desktop Markdown editor. The product target is a
+clean, Typora-like writing surface: native menus, quiet chrome, direct file
+opening, multi-tab editing, and a hybrid Markdown engine that previews structure
+without taking the document out of an editable source model.
 
-Currently, two official plugins are available:
+## Product Design
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Hebe is built around a few rules:
 
-## React Compiler
+- The document is the primary surface. Top chrome and the status bar stay small,
+  theme-aware, and visually unified with the editor background.
+- macOS and Windows behaviors should be native where possible. Commands live in
+  the system menu, not in oversized in-app toolbars.
+- Sidebars are optional and collapsed by default. File navigation and outline
+  panels are resizable supporting tools, not permanent layout weight.
+- Markdown files can be opened from the dialog, recent-file restore, OS open
+  events, and drag-and-drop.
+- Settings use a standard modal dialog and never take over the file sidebar.
+- Editing uses a "preview until touched" model: rendered Markdown stays readable,
+  and clicking a line or block reveals the source needed for direct editing.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## App Architecture
 
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```text
+src/
+  App.tsx                         App shell, theme sync, drag/open events
+  stores/app-store.ts             Zustand state: tabs, layout, theme, zoom, recent files
+  components/layout/              Tab bar, editor area, sidebars, status bar, settings
+  components/editor/HybridEditor  CodeMirror 6 host and extension wiring
+  components/editor/extensions/   Markdown preview engine and block widgets
+  lib/ipc.ts                      Typed Tauri command wrappers
+src-tauri/
+  src/lib.rs                      Tauri builder, native menu, window lifecycle, OS open events
+  src/commands/                   File IO, folders, export, search, image paste, reveal
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+The frontend owns editor state and interaction. The Rust side owns native shell
+integration, filesystem access, export/search commands, app menus, and macOS
+open/reopen behavior.
+
+## Markdown Kernel
+
+The Markdown kernel is a CodeMirror 6 hybrid renderer. It does not convert the
+document into a separate HTML preview; the source text remains the canonical
+model at all times.
+
+Core pieces:
+
+- `HybridEditor.tsx` wires the editor state, keymaps, markdown highlighting,
+  preview extensions, paste handling, and block widgets.
+- `hybrid-preview.ts` provides inline preview decorations and reveal state.
+  Markdown markers are hidden in preview mode, but the active/revealed line
+  shows raw source for editing.
+- `block-widgets.ts` replaces larger Markdown blocks with editable widgets:
+  fenced code, Mermaid, KaTeX block math, images, and tables.
+- `previewRevealRangeField` coordinates source reveal across inline decorations
+  and block widgets.
+- Click reveal happens on `mousedown` for unrevealed lines, which prevents
+  CodeMirror from briefly selecting the wrong nearby widget before the intended
+  line enters edit mode.
+
+Supported preview behavior:
+
+- Headings, emphasis, strong text, strikethrough, inline code, links.
+- Block quotes, lists, task lists, horizontal rules.
+- Fenced code blocks isolated from Markdown re-parsing.
+- Mermaid fenced blocks rendered through Mermaid with source fallback.
+- Inline and block math through KaTeX.
+- Markdown tables rendered as editable table widgets.
+- Local images resolved relative to the Markdown file path.
+
+Important engine constraints:
+
+- Fenced code blocks are isolation boundaries. Inline Markdown scanners must not
+  run inside them.
+- Widgets must be editable. A click should reveal the original source range and
+  place the cursor near the user's click target.
+- Preview decorations should be cheap. Inline scanning is capped by line length,
+  and block scanning skips already-classified ranges.
+- Source remains the source of truth. Generated widget DOM must never become
+  canonical document state.
+
+## Native Integration
+
+- System menus emit `menu-action` events consumed by the editor area.
+- Close hides the main window instead of quitting; reopen restores/focuses it.
+- Startup and macOS file-open events are queued through `take_pending_open_files`.
+- Recent files are restored on launch; missing recent paths are pruned.
+- Auto-save runs after a short debounce for saved files.
+- External file changes are detected by mtime polling when the current tab is
+  clean.
+
+## Development
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Run the app in development:
+
+```bash
+npm run tauri:dev
+```
+
+Check the project:
+
+```bash
+npm run build
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+
+Build a macOS `.app` bundle:
+
+```bash
+npm run tauri -- build --bundles app
+```
+
+Current release builds use Rust release stripping in `src-tauri/Cargo.toml`.
+The generated macOS bundle is expected around 16 MB before signing/notarization.
+
+## Release Notes for Local Testing
+
+The local test flow copies the built app to both common test locations:
+
+```bash
+pkill -x hebe || true
+rm -rf /Applications/Hebe.app "$HOME/Desktop/Hebe.app"
+cp -R src-tauri/target/release/bundle/macos/Hebe.app /Applications/Hebe.app
+cp -R src-tauri/target/release/bundle/macos/Hebe.app "$HOME/Desktop/Hebe.app"
+```
+
+The private GitHub repository is:
+
+```text
+https://github.com/Hong1495/Hebe
+```
