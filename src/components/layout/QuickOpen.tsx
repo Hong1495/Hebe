@@ -1,7 +1,8 @@
-import { readTextFile as tauriReadTextFile } from "@tauri-apps/plugin-fs";
 import Fuse from "fuse.js";
+import { FileText, Loader2, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { listDirectory } from "../../lib/ipc";
+import { listMarkdownFiles, readMarkdownFile } from "../../lib/ipc";
+import { basename, relativePath } from "../../lib/path";
 import { useAppStore } from "../../stores/app-store";
 
 interface QuickOpenProps {
@@ -20,40 +21,33 @@ export function QuickOpen({ open, onClose }: QuickOpenProps) {
   const addRecentFile = useAppStore((s) => s.addRecentFile);
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<ScoredFile[]>([]);
+  const [loading, setLoading] = useState(false);
   const [selectedIdx, setSelectedIdx] = useState(0);
 
-  // Collect all markdown files recursively
   useEffect(() => {
     if (!open || !folderPath) {
       if (!open) setQuery("");
+      if (!open) setFiles([]);
+      setLoading(false);
       return;
     }
     setQuery("");
+    setLoading(true);
 
     let cancelled = false;
 
-    async function collect(dir: string): Promise<ScoredFile[]> {
-      if (cancelled) return [];
-      const result: ScoredFile[] = [];
-      try {
-        const entries = await listDirectory(dir);
-        for (const e of entries) {
-          if (cancelled) break;
-          if (e.is_dir) {
-            result.push(...(await collect(e.path)));
-          } else if (/(?:\.md|\.markdown|\.mdx|\.mkd|\.mkdn)$/i.test(e.name)) {
-            result.push({ name: e.name, path: e.path });
-          }
+    listMarkdownFiles(folderPath)
+      .then((entries) => {
+        if (!cancelled) {
+          setFiles(entries.map((entry) => ({ name: entry.name, path: entry.path })));
         }
-      } catch {
-        // skip
-      }
-      return result;
-    }
-
-    collect(folderPath).then((r) => {
-      if (!cancelled) setFiles(r);
-    });
+      })
+      .catch(() => {
+        if (!cancelled) setFiles([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
 
     return () => {
       cancelled = true;
@@ -81,12 +75,12 @@ export function QuickOpen({ open, onClose }: QuickOpenProps) {
   const handleSelect = useCallback(
     async (file: ScoredFile) => {
       try {
-        const content = await tauriReadTextFile(file.path);
+        const content = await readMarkdownFile(file.path);
         openFile(file.path, content);
         addRecentFile(file.path);
         onClose();
-      } catch {
-        // skip
+      } catch (err) {
+        console.error("Failed to open quick file:", file.path, err);
       }
     },
     [openFile, addRecentFile, onClose],
@@ -115,35 +109,32 @@ export function QuickOpen({ open, onClose }: QuickOpenProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]"
+      className="command-backdrop fixed inset-0 z-50 flex items-start justify-center pt-[18vh]"
       onClick={onClose}
-      style={{ background: "rgba(0,0,0,0.3)" }}
     >
       <div
-        className="w-[500px] max-h-[360px] rounded-xl shadow-2xl overflow-hidden flex flex-col"
-        style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+        className="command-panel w-[560px] max-h-[420px] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <input
-          autoFocus
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Search files by name..."
-          className="w-full px-4 py-3 text-sm border-b outline-none"
-          style={{
-            background: "transparent",
-            color: "var(--text)",
-            borderColor: "var(--border)",
-          }}
-        />
+        <div className="command-input-row">
+          <Search size={17} />
+          <input
+            autoFocus
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Open markdown file"
+          />
+          {loading && <Loader2 className="animate-spin" size={16} />}
+        </div>
         <div className="flex-1 overflow-y-auto">
-          {results.length === 0 ? (
-            <div
-              className="px-4 py-6 text-center text-xs"
-              style={{ color: "var(--text-secondary)" }}
-            >
+          {!folderPath ? (
+            <div className="command-empty">Open a folder first</div>
+          ) : loading ? (
+            <div className="command-empty">Indexing files...</div>
+          ) : results.length === 0 ? (
+            <div className="command-empty">
               No files found
             </div>
           ) : (
@@ -151,22 +142,17 @@ export function QuickOpen({ open, onClose }: QuickOpenProps) {
               <button
                 key={item.path}
                 type="button"
-                className="w-full text-left px-4 py-2 text-sm flex items-center gap-2 transition-colors"
-                style={{
-                  background: idx === selectedIdx ? "var(--accent-bg)" : "transparent",
-                  color: idx === selectedIdx ? "var(--accent)" : "var(--text)",
-                }}
+                className={`command-result ${idx === selectedIdx ? "is-selected" : ""}`}
                 onClick={() => handleSelect(item)}
                 onMouseEnter={() => setSelectedIdx(idx)}
               >
-                <span className="text-xs shrink-0">📄</span>
-                <span className="truncate">{item.name}</span>
-                <span
-                  className="text-xs truncate ml-auto opacity-50"
-                  style={{ color: "var(--text-secondary)" }}
-                >
-                  {item.path.replace(folderPath ?? "", "").replace(/^\//, "")}
-                </span>
+                <FileText size={15} />
+                <div className="command-result-stack">
+                  <span className="command-result-title">{item.name}</span>
+                  <span className="command-result-path">
+                    {relativePath(item.path, folderPath ?? "") || basename(item.path)}
+                  </span>
+                </div>
               </button>
             ))
           )}

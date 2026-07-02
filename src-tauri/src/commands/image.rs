@@ -14,8 +14,7 @@ pub async fn paste_image(image_data: Vec<u8>, md_path: String) -> Result<String,
     let filename = format!("image-{}.png", ts.as_millis());
     let filepath = assets_dir.join(&filename);
 
-    std::fs::write(&filepath, &image_data)
-        .map_err(|e| format!("Failed to write image: {e}"))?;
+    std::fs::write(&filepath, &image_data).map_err(|e| format!("Failed to write image: {e}"))?;
 
     Ok(format!("assets/{}", filename))
 }

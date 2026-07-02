@@ -1,134 +1,396 @@
-import { syntaxTree } from "@codemirror/language";
-import { StateEffect, StateField } from "@codemirror/state";
-import {
-  Decoration,
-  type DecorationSet,
-  EditorView,
-  ViewPlugin,
-  type ViewUpdate,
-} from "@codemirror/view";
+import { StateEffect, StateField, type EditorState } from "@codemirror/state";
+import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
 
-// Track whether the mouse is currently selecting (prevent flicker during drag)
-export const setMouseSelecting = StateEffect.define<boolean>();
+export interface PreviewRevealRange {
+  from: number;
+  to: number;
+}
 
-export const mouseSelectingField = StateField.define<boolean>({
+export const setPreviewRevealRange = StateEffect.define<PreviewRevealRange | null>();
+export const setEditorFocused = StateEffect.define<boolean>();
+
+export const editorFocusedField = StateField.define<boolean>({
   create() {
     return false;
   },
   update(value, tr) {
-    for (const e of tr.effects) {
-      if (e.is(setMouseSelecting)) return e.value;
+    for (const effect of tr.effects) {
+      if (effect.is(setEditorFocused)) return effect.value;
     }
     return value;
   },
 });
 
-// Mark types that should be hidden in preview mode
-const HIDDEN_MARKS = new Set([
-  "HeaderMark",
-  "EmphasisMark",
-  "StrongMark",
-  "CodeMark",
-  "LinkMark",
-  "QuoteMark",
-  "ListMark",
-  "LinkReferenceMark",
-  "CodeInfo",
-  "StrikethroughMark",
-]);
+export const editorFocusPlugin = EditorView.focusChangeEffect.of((_state, focusing) =>
+  setEditorFocused.of(focusing),
+);
 
-function hideMarkDeco(view: EditorView): DecorationSet {
-  const decorations: { from: number; to: number; deco: Decoration }[] = [];
-  const { state } = view;
-  const tree = syntaxTree(state);
-  const cursorLine = state.selection.main.head;
+export const previewRevealRangeField = StateField.define<PreviewRevealRange | null>({
+  create() {
+    return null;
+  },
+  update(value, tr) {
+    let next = value
+      ? {
+          from: tr.changes.mapPos(value.from),
+          to: tr.changes.mapPos(value.to),
+        }
+      : null;
 
-  // Determine which lines should have syntax revealed
+    for (const effect of tr.effects) {
+      if (effect.is(setPreviewRevealRange)) next = effect.value;
+      if (effect.is(setEditorFocused) && !effect.value) next = null;
+    }
+
+    if (next && tr.selection && !selectionTouchesRange(tr.state, next.from, next.to)) {
+      next = null;
+    }
+
+    return next;
+  },
+});
+
+const MAX_INLINE_SCAN_LENGTH = 6000;
+
+interface ActiveFence {
+  marker: "`" | "~";
+  length: number;
+}
+
+interface DecoSpec {
+  from: number;
+  to: number;
+  deco: Decoration;
+}
+
+interface Span {
+  from: number;
+  to: number;
+}
+
+class ListMarkerWidget extends WidgetType {
+  private readonly marker: string;
+  private readonly checked: boolean | null;
+
+  constructor(marker: string, checked: boolean | null = null) {
+    super();
+    this.marker = marker;
+    this.checked = checked;
+  }
+
+  override eq(other: ListMarkerWidget): boolean {
+    return other.marker === this.marker && other.checked === this.checked;
+  }
+
+  toDOM(): HTMLElement {
+    const span = document.createElement("span");
+    span.className = "cm-list-marker";
+    if (this.checked !== null) {
+      span.classList.add(this.checked ? "is-checked" : "is-unchecked");
+    }
+    span.textContent = this.checked === null ? this.marker : this.checked ? "☑" : "☐";
+    return span;
+  }
+
+  ignoreEvent(): boolean {
+    return false;
+  }
+}
+
+function hideMarkDeco(state: EditorState): DecorationSet {
+  const decorations: DecoSpec[] = [];
   const revealLines = new Set<number>();
-  const ranges = state.selection.ranges;
-  for (const r of ranges) {
-    const fromLine = state.doc.lineAt(r.from).number;
-    const toLine = state.doc.lineAt(r.to).number;
+  const revealRange = state.field(previewRevealRangeField, false) ?? null;
+  const editorFocused = state.field(editorFocusedField, false) ?? false;
+
+  if (editorFocused) {
+    for (const r of state.selection.ranges) {
+      const fromLine = state.doc.lineAt(r.from).number;
+      const toLine = state.doc.lineAt(Math.min(r.to, state.doc.length)).number;
+      for (let i = fromLine; i <= toLine; i++) revealLines.add(i);
+    }
+  }
+  if (revealRange) {
+    const fromLine = state.doc.lineAt(Math.min(revealRange.from, state.doc.length)).number;
+    const toLine = state.doc.lineAt(Math.min(revealRange.to, state.doc.length)).number;
     for (let i = fromLine; i <= toLine; i++) revealLines.add(i);
   }
-  // Always reveal the cursor line
-  revealLines.add(state.doc.lineAt(cursorLine).number);
 
-  tree.iterate({
-    enter(node) {
-      const nodeType = node.type.name;
-      if (HIDDEN_MARKS.has(nodeType)) {
-        const from = node.from;
-        const to = node.to;
-        const fromLine = state.doc.lineAt(from).number;
-        const toLine = state.doc.lineAt(to).number;
+  let activeFence: ActiveFence | null = null;
 
-        // Only hide if the mark is NOT on revealed lines
-        let onRevealed = false;
-        for (let i = fromLine; i <= toLine; i++) {
-          if (revealLines.has(i)) {
-            onRevealed = true;
-            break;
-          }
-        }
+  for (let lineNo = 1; lineNo <= state.doc.lines; lineNo++) {
+    const line = state.doc.line(lineNo);
+    const revealed = revealLines.has(lineNo);
 
-        if (!onRevealed) {
-          decorations.push({
-            from,
-            to,
-            deco: Decoration.replace({
-              inclusive: false,
-            }),
-          });
-        }
-      }
+    if (activeFence) {
+      scanFencedCodeLine(line.text, line.from, decorations);
+      if (isFenceCloser(line.text, activeFence)) activeFence = null;
+      continue;
+    }
 
-      // Handle inline code: hide backtick markers
-      if (nodeType === "Monospace") {
-        const from = node.from;
-        const to = node.to;
-        const fromLine = state.doc.lineAt(from).number;
-        const text = state.doc.sliceString(from, to);
-        const backtickMatch = text.match(/^`+([\s\S]*?)`+$/);
+    const fence = readFenceOpener(line.text);
+    if (fence) {
+      scanFencedCodeLine(line.text, line.from, decorations);
+      activeFence = fence;
+      continue;
+    }
 
-        if (backtickMatch) {
-          let onRevealed = false;
-          for (let i = fromLine; i <= state.doc.lineAt(to).number; i++) {
-            if (revealLines.has(i)) {
-              onRevealed = true;
-              break;
-            }
-          }
-
-          if (!onRevealed) {
-            // Find the markers (opening ` + closing ` )
-            const openLen = backtickMatch[0].length - backtickMatch[0].replace(/^`+/, "").length;
-            const closeLen = backtickMatch[0].length - backtickMatch[0].replace(/`+$/, "").length;
-
-            const innerFrom = from + openLen;
-            const innerTo = to - closeLen;
-
-            if (innerFrom < innerTo) {
-              decorations.push({
-                from,
-                to: innerFrom,
-                deco: Decoration.replace({}),
-              });
-              decorations.push({
-                from: innerTo,
-                to,
-                deco: Decoration.replace({}),
-              });
-            }
-          }
-        }
-      }
-    },
-  });
+    scanLineDecorations(line.text, line.from, revealed, decorations);
+  }
 
   return Decoration.set(
     decorations.map((d) => d.deco.range(d.from, d.to)),
     true,
+  );
+}
+
+function readFenceOpener(text: string): ActiveFence | null {
+  const match = text.match(/^\s{0,3}(`{3,}|~{3,})/);
+  if (!match) return null;
+  const marker = match[1][0] as "`" | "~";
+  return { marker, length: match[1].length };
+}
+
+function isFenceCloser(text: string, fence: ActiveFence): boolean {
+  const escapedMarker = fence.marker === "`" ? "`" : "~";
+  return new RegExp(`^\\s{0,3}${escapedMarker}{${fence.length},}\\s*$`).test(text);
+}
+
+function scanFencedCodeLine(text: string, lineFrom: number, decorations: DecoSpec[]): void {
+  addLineClass(lineFrom, "md-code-block-line", decorations);
+  if (/^\s{0,3}(`{3,}|~{3,})/.test(text)) {
+    addLineClass(lineFrom, "md-code-fence-line", decorations);
+  }
+}
+
+function scanLineDecorations(
+  text: string,
+  lineFrom: number,
+  revealed: boolean,
+  decorations: DecoSpec[],
+): void {
+  const heading = text.match(/^(#{1,6})([ \t]+)(.*)$/);
+  if (heading) {
+    const level = heading[1].length;
+    addLineClass(lineFrom, `md-heading md-heading-${level}`, decorations);
+    if (!revealed) {
+      addReplace(lineFrom, lineFrom + heading[1].length + heading[2].length, decorations);
+    }
+  }
+
+  if (/^\s{0,3}>/.test(text)) {
+    addLineClass(lineFrom, "md-quote-line", decorations);
+    if (!revealed) {
+      const quoteMatch = text.match(/^(\s{0,3}(?:>[ \t]?)+)/);
+      if (quoteMatch) addReplace(lineFrom, lineFrom + quoteMatch[1].length, decorations);
+    }
+  }
+
+  const listMatch = text.match(/^(\s*)([-+*]|\d+[.)])([ \t]+)(\[[ xX]\][ \t]+)?/);
+  if (listMatch) {
+    addLineClass(lineFrom, "md-list-line", decorations);
+    if (!revealed) {
+      const markerStart = lineFrom + listMatch[1].length;
+      const markerEnd = lineFrom + listMatch[0].length;
+      const checkbox = listMatch[4]?.match(/\[([ xX])\]/)?.[1];
+      const marker = /^\d/.test(listMatch[2]) ? listMatch[2] : "•";
+      decorations.push({
+        from: markerStart,
+        to: markerEnd,
+        deco: Decoration.replace({
+          widget: new ListMarkerWidget(marker, checkbox ? checkbox.toLowerCase() === "x" : null),
+        }),
+      });
+    }
+  }
+
+  if (/^\s{0,3}(```|~~~)/.test(text)) {
+    addLineClass(lineFrom, "md-code-fence-line", decorations);
+  }
+
+  if (/^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/.test(text)) {
+    addLineClass(lineFrom, "md-rule-line", decorations);
+  }
+
+  if (text.length <= MAX_INLINE_SCAN_LENGTH) {
+    scanInlineMarkdown(text, lineFrom, revealed, decorations);
+  }
+}
+
+function scanInlineMarkdown(
+  text: string,
+  lineFrom: number,
+  revealed: boolean,
+  decorations: DecoSpec[],
+): void {
+  const protectedSpans: Span[] = [];
+
+  scanCodeSpans(text, lineFrom, revealed, decorations, protectedSpans);
+  scanLinks(text, lineFrom, revealed, decorations, protectedSpans);
+  scanDelimited(
+    text,
+    lineFrom,
+    revealed,
+    decorations,
+    protectedSpans,
+    /(\*\*|__)([^*_]+?)\1/g,
+    "md-strong",
+  );
+  scanDelimited(
+    text,
+    lineFrom,
+    revealed,
+    decorations,
+    protectedSpans,
+    /~~([^~]+?)~~/g,
+    "md-strike",
+  );
+  scanEmphasis(text, lineFrom, revealed, decorations, protectedSpans);
+}
+
+function scanCodeSpans(
+  text: string,
+  lineFrom: number,
+  revealed: boolean,
+  decorations: DecoSpec[],
+  protectedSpans: Span[],
+): void {
+  const codeRe = /(`+)([^`\n]+?)\1/g;
+  let match: RegExpExecArray | null;
+  while ((match = codeRe.exec(text)) !== null) {
+    const from = lineFrom + match.index;
+    const to = from + match[0].length;
+    const tickLen = match[1].length;
+    const innerFrom = from + tickLen;
+    const innerTo = to - tickLen;
+    if (innerFrom >= innerTo) continue;
+
+    addMark(innerFrom, innerTo, "md-code", decorations);
+    if (!revealed) {
+      addReplace(from, innerFrom, decorations);
+      addReplace(innerTo, to, decorations);
+    }
+    protectedSpans.push({ from, to });
+  }
+}
+
+function scanLinks(
+  text: string,
+  lineFrom: number,
+  revealed: boolean,
+  decorations: DecoSpec[],
+  protectedSpans: Span[],
+): void {
+  const linkRe = /(!?)\[([^\]\n]+)\]\(([^)\n]+)\)/g;
+  let match: RegExpExecArray | null;
+  while ((match = linkRe.exec(text)) !== null) {
+    if (match[1]) continue;
+    const from = lineFrom + match.index;
+    const to = from + match[0].length;
+    const labelFrom = from + 1;
+    const labelTo = labelFrom + match[2].length;
+    if (spanOverlaps({ from, to }, protectedSpans)) continue;
+
+    addMark(labelFrom, labelTo, "md-link", decorations);
+    if (!revealed) {
+      addReplace(from, labelFrom, decorations);
+      addReplace(labelTo, to, decorations);
+    }
+    protectedSpans.push({ from, to });
+  }
+}
+
+function scanDelimited(
+  text: string,
+  lineFrom: number,
+  revealed: boolean,
+  decorations: DecoSpec[],
+  protectedSpans: Span[],
+  regexp: RegExp,
+  className: string,
+): void {
+  let match: RegExpExecArray | null;
+  while ((match = regexp.exec(text)) !== null) {
+    const from = lineFrom + match.index;
+    const to = from + match[0].length;
+    if (spanOverlaps({ from, to }, protectedSpans)) continue;
+
+    const delimiter = className === "md-strike" ? "~~" : match[1];
+    const innerFrom = from + delimiter.length;
+    const innerTo = to - delimiter.length;
+    if (innerFrom >= innerTo) continue;
+
+    addMark(innerFrom, innerTo, className, decorations);
+    if (!revealed) {
+      addReplace(from, innerFrom, decorations);
+      addReplace(innerTo, to, decorations);
+    }
+  }
+}
+
+function scanEmphasis(
+  text: string,
+  lineFrom: number,
+  revealed: boolean,
+  decorations: DecoSpec[],
+  protectedSpans: Span[],
+): void {
+  const emphasisRe = /(^|[\s([{"'])((?:\*|_))([^*_]+?)\2(?=$|[\s.,;:!?)]}"'])/g;
+  let match: RegExpExecArray | null;
+  while ((match = emphasisRe.exec(text)) !== null) {
+    const delimiterFrom = lineFrom + match.index + match[1].length;
+    const from = delimiterFrom;
+    const to = delimiterFrom + match[2].length + match[3].length + match[2].length;
+    if (spanOverlaps({ from, to }, protectedSpans)) continue;
+
+    const innerFrom = delimiterFrom + match[2].length;
+    const innerTo = innerFrom + match[3].length;
+    if (innerFrom >= innerTo) continue;
+
+    addMark(innerFrom, innerTo, "md-emphasis", decorations);
+    if (!revealed) {
+      addReplace(from, innerFrom, decorations);
+      addReplace(innerTo, to, decorations);
+    }
+  }
+}
+
+function addLineClass(from: number, className: string, decorations: DecoSpec[]): void {
+  decorations.push({
+    from,
+    to: from,
+    deco: Decoration.line({ class: className }),
+  });
+}
+
+function addMark(from: number, to: number, className: string, decorations: DecoSpec[]): void {
+  if (from >= to) return;
+  decorations.push({ from, to, deco: Decoration.mark({ class: className }) });
+}
+
+function addReplace(from: number, to: number, decorations: DecoSpec[]): void {
+  if (from >= to) return;
+  decorations.push({ from, to, deco: Decoration.replace({ inclusive: false }) });
+}
+
+function spanOverlaps(span: Span, spans: Span[]): boolean {
+  return spans.some((other) => span.from < other.to && span.to > other.from);
+}
+
+function selectionTouchesRange(
+  state: { selection: { ranges: readonly { from: number; to: number }[] } },
+  from: number,
+  to: number,
+): boolean {
+  return state.selection.ranges.some((range) => range.from <= to && range.to >= from);
+}
+
+function rangeIsCurrentlyRevealed(state: EditorState, from: number, to: number): boolean {
+  const editorFocused = state.field(editorFocusedField, false) ?? false;
+  const revealRange = state.field(previewRevealRangeField, false) ?? null;
+  return (
+    (editorFocused && selectionTouchesRange(state, from, to)) ||
+    (revealRange !== null && revealRange.from <= to && revealRange.to >= from)
   );
 }
 
@@ -168,33 +430,199 @@ export const pasteImagePlugin = (mdPath: string | null) =>
     },
   });
 
-export const inlinePreviewPlugin = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet;
-
-    constructor(view: EditorView) {
-      this.decorations = hideMarkDeco(view);
-    }
-
-    update(update: ViewUpdate) {
-      const mouseSelecting = update.state.field(mouseSelectingField, false);
-      if (mouseSelecting) return;
-
-      if (update.docChanged || update.selectionSet || update.viewportChanged) {
-        this.decorations = hideMarkDeco(update.view);
-      }
-    }
+export const inlinePreviewPlugin = StateField.define<DecorationSet>({
+  create(state) {
+    return hideMarkDeco(state);
   },
-  {
-    decorations: (v) => v.decorations,
-    eventHandlers: {
-      mousedown() {
-        // Deferred: we'll set mouse selecting via an effect
+  update(decorations, transaction) {
+    const revealChanged = transaction.effects.some(
+      (effect) => effect.is(setPreviewRevealRange) || effect.is(setEditorFocused),
+    );
+    if (transaction.docChanged || transaction.selection || revealChanged) {
+      return hideMarkDeco(transaction.state);
+    }
+    return decorations.map(transaction.changes);
+  },
+  provide(field) {
+    return EditorView.decorations.from(field);
+  },
+});
+
+export const clickRevealPlugin = (() => {
+  return EditorView.domEventHandlers({
+    mousedown(event, view) {
+      if (
+        event.button !== 0 ||
+        event.detail > 1 ||
+        event.shiftKey ||
+        event.metaKey ||
+        event.altKey ||
+        event.ctrlKey ||
+        (event.target instanceof Element && event.target.closest(".cm-editable-widget"))
+      ) {
         return false;
-      },
+      }
+
+      const click = clickPositionFromEvent(event, view);
+      if (!click) return false;
+      if (rangeIsCurrentlyRevealed(view.state, click.lineFrom, click.lineTo)) return false;
+
+      event.preventDefault();
+      view.dispatch({
+        selection: { anchor: click.pos, head: click.pos },
+        effects: setPreviewRevealRange.of({ from: click.lineFrom, to: click.lineTo }),
+      });
+      view.focus();
+      return true;
     },
-  },
-);
+  });
+})();
+
+interface ClickPosition {
+  pos: number;
+  lineFrom: number;
+  lineTo: number;
+}
+
+function clickPositionFromEvent(event: MouseEvent, view: EditorView): ClickPosition | null {
+  const targetLine = lineFromEventTarget(event, view);
+  const coordsPos = view.posAtCoords({ x: event.clientX, y: event.clientY }, false);
+
+  if (targetLine) {
+    const pos = visualPositionInLine(event, view, targetLine.element, targetLine.line);
+    return { pos, lineFrom: targetLine.line.from, lineTo: targetLine.line.to };
+  }
+
+  if (coordsPos === null) return null;
+  const line = view.state.doc.lineAt(coordsPos);
+  return { pos: coordsPos, lineFrom: line.from, lineTo: line.to };
+}
+
+function lineFromEventTarget(event: MouseEvent, view: EditorView) {
+  const target = eventTargetElement(event);
+  const lineElement = target?.closest(".cm-line") as HTMLElement | null;
+  if (!lineElement) return null;
+
+  try {
+    const line = view.state.doc.lineAt(view.posAtDOM(lineElement, 0));
+    return { element: lineElement, line };
+  } catch {
+    return null;
+  }
+}
+
+function eventTargetElement(event: MouseEvent): Element | null {
+  if (event.target instanceof Element) return event.target;
+  if (event.target instanceof Node) return event.target.parentElement;
+  return null;
+}
+
+function visualPositionInLine(
+  event: MouseEvent,
+  view: EditorView,
+  element: HTMLElement,
+  line: { from: number; to: number },
+): number {
+  const visibleBounds = visibleTextBounds(element);
+  if (visibleBounds) {
+    if (event.clientX < visibleBounds.left - 1) return line.from;
+    if (event.clientX > visibleBounds.right + 1) return line.to;
+  }
+
+  const caretPos = domCaretPositionFromPoint(event, view, line.from, line.to);
+  if (caretPos !== null) return caretPos;
+
+  const coordsPos = view.posAtCoords({ x: event.clientX, y: event.clientY }, false);
+  if (coordsPos !== null) {
+    const coordsLine = view.state.doc.lineAt(coordsPos);
+    if (coordsLine.from === line.from && coordsLine.to === line.to) {
+      return clampInt(coordsPos, line.from, line.to);
+    }
+  }
+
+  return approximatePositionInLine(event, element, line.from, line.to);
+}
+
+function domCaretPositionFromPoint(
+  event: MouseEvent,
+  view: EditorView,
+  from: number,
+  to: number,
+): number | null {
+  const doc = document as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+
+  try {
+    const caret = doc.caretPositionFromPoint?.(event.clientX, event.clientY);
+    if (caret) {
+      const pos = view.posAtDOM(caret.offsetNode, caret.offset);
+      if (pos >= from && pos <= to) return clampInt(pos, from, to);
+    }
+  } catch {
+    // Some WebKit builds throw for widget DOM nodes. Fall back below.
+  }
+
+  try {
+    const range = doc.caretRangeFromPoint?.(event.clientX, event.clientY);
+    if (range) {
+      const pos = view.posAtDOM(range.startContainer, range.startOffset);
+      if (pos >= from && pos <= to) return clampInt(pos, from, to);
+    }
+  } catch {
+    // Fall through to coordinate and ratio based fallback.
+  }
+
+  return null;
+}
+
+function visibleTextBounds(element: HTMLElement): { left: number; right: number } | null {
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      return node.textContent && node.textContent.length > 0
+        ? NodeFilter.FILTER_ACCEPT
+        : NodeFilter.FILTER_REJECT;
+    },
+  });
+  const range = document.createRange();
+  let left = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    range.selectNodeContents(node);
+    for (const rect of Array.from(range.getClientRects())) {
+      if (rect.width <= 0 && rect.height <= 0) continue;
+      left = Math.min(left, rect.left);
+      right = Math.max(right, rect.right);
+    }
+  }
+
+  range.detach();
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return null;
+  return { left, right };
+}
+
+function approximatePositionInLine(
+  event: MouseEvent,
+  element: HTMLElement,
+  from: number,
+  to: number,
+): number {
+  const bounds = visibleTextBounds(element);
+  const rect = bounds ?? element.getBoundingClientRect();
+  const width = Math.max(0, rect.right - rect.left);
+  const ratio = width > 0 ? clamp((event.clientX - rect.left) / width, 0, 1) : 0;
+  return from + Math.round(ratio * Math.max(0, to - from));
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function clampInt(value: number, min: number, max: number): number {
+  return Math.round(clamp(value, min, max));
+}
 
 // Base theme that styles the hidden decorations visually
 export const hybridBaseTheme = EditorView.baseTheme({
@@ -205,40 +633,147 @@ export const hybridBaseTheme = EditorView.baseTheme({
   ".cm-line.cm-activeLine .cm-hybrid-hidden": {
     display: "inline !important",
   },
+  ".cm-line": {
+    padding: "1px 0",
+  },
+  ".cm-line.cm-activeLine": {
+    background: "transparent",
+  },
+  ".cm-activeLineGutter": {
+    background: "transparent",
+  },
   "&.cm-editor": {
     height: "100%",
+    color: "var(--text)",
+    background: "var(--bg)",
   },
   "&.cm-editor .cm-scroller": {
     fontFamily: "var(--font-sans)",
     fontSize: "var(--editor-font-size)",
     lineHeight: "var(--editor-line-height)",
+    scrollbarWidth: "none",
+  },
+  "&.cm-editor .cm-scroller::-webkit-scrollbar": {
+    width: "0",
+    height: "0",
   },
   "&.cm-editor .cm-content": {
     fontFamily: "var(--font-sans)",
-    maxWidth: "var(--editor-width)",
+    width: "min(var(--editor-width), calc(100% - 112px))",
+    maxWidth: "calc(100% - 112px)",
     margin: "0 auto",
-    padding: "48px 32px",
+    padding: "52px 0 110px",
+    boxSizing: "border-box",
   },
   "&.cm-editor.cm-focused": {
     outline: "none",
   },
+  ".md-heading-1": {
+    fontSize: "1.85em",
+    fontWeight: "700",
+    color: "var(--text-heading)",
+  },
+  ".md-heading-2": {
+    fontSize: "1.38em",
+    fontWeight: "650",
+    color: "var(--text-heading)",
+  },
+  ".md-heading-3": {
+    fontSize: "1.18em",
+    fontWeight: "620",
+    color: "var(--text-heading)",
+  },
+  ".md-heading": {
+    fontWeight: "600",
+    color: "var(--text-heading)",
+  },
+  ".md-strong": {
+    fontWeight: "700",
+    color: "var(--text-heading)",
+  },
+  ".md-emphasis": {
+    fontStyle: "italic",
+  },
+  ".md-link": {
+    color: "color-mix(in srgb, var(--accent) 76%, var(--text))",
+    textDecoration: "none",
+    borderBottom: "1px solid color-mix(in srgb, var(--accent) 30%, transparent)",
+  },
+  ".md-url": {
+    color: "var(--text-secondary)",
+  },
+  ".md-code": {
+    fontFamily: "var(--font-mono)",
+    fontSize: "0.9em",
+    color: "var(--text-heading)",
+    background: "color-mix(in srgb, var(--code-bg) 78%, transparent)",
+    borderRadius: "4px",
+    padding: "0 0.28em",
+  },
+  ".md-quote": {
+    color: "var(--text-secondary)",
+  },
+  ".md-list": {
+    color: "var(--text-secondary)",
+  },
+  ".md-list-line": {
+    color: "var(--text)",
+  },
+  ".cm-list-marker": {
+    display: "inline-block",
+    minWidth: "1.35em",
+    color: "var(--text-secondary)",
+    fontWeight: "500",
+  },
+  ".cm-list-marker.is-checked": {
+    color: "color-mix(in srgb, var(--accent) 72%, var(--text))",
+  },
+  ".md-mark": {
+    color: "var(--md-char-color)",
+  },
+  ".md-strike": {
+    textDecoration: "line-through",
+    color: "var(--text-secondary)",
+  },
+  ".md-quote-line": {
+    color: "var(--text-secondary)",
+    borderLeft: "2px solid color-mix(in srgb, var(--accent) 30%, var(--border))",
+    paddingLeft: "12px",
+  },
+  ".md-code-block-line": {
+    fontFamily: "var(--font-mono)",
+    fontSize: "0.92em",
+    color: "var(--text)",
+  },
+  ".md-code-fence-line": {
+    fontFamily: "var(--font-mono)",
+    color: "var(--text-secondary)",
+  },
+  ".md-rule-line": {
+    color: "transparent",
+    borderTop: "1px solid color-mix(in srgb, var(--border) 76%, transparent)",
+    transform: "translateY(0.8em)",
+  },
+  ".md-separator": {
+    color: "transparent",
+  },
   // Heading styles (rendered view)
   ".cm-md-heading1": {
-    fontSize: "2em",
+    fontSize: "1.85em",
     fontWeight: "700",
-    marginTop: "0.8em",
-    marginBottom: "0.4em",
+    marginTop: "0.9em",
+    marginBottom: "0.45em",
     color: "var(--text-heading)",
   },
   ".cm-md-heading2": {
-    fontSize: "1.5em",
+    fontSize: "1.38em",
     fontWeight: "600",
-    marginTop: "0.7em",
-    marginBottom: "0.3em",
+    marginTop: "0.8em",
+    marginBottom: "0.35em",
     color: "var(--text-heading)",
   },
   ".cm-md-heading3": {
-    fontSize: "1.25em",
+    fontSize: "1.18em",
     fontWeight: "600",
     marginTop: "0.6em",
     marginBottom: "0.2em",
@@ -256,17 +791,15 @@ export const hybridBaseTheme = EditorView.baseTheme({
   ".cm-md-monospace": {
     fontFamily: "var(--font-mono)",
     fontSize: "0.9em",
-    background: "var(--code-bg)",
-    borderRadius: "3px",
-    padding: "2px 4px",
+    background: "color-mix(in srgb, var(--code-bg) 78%, transparent)",
+    borderRadius: "4px",
+    padding: "0 0.28em",
   },
   // Code blocks
   ".cm-md-codeblock": {
     fontFamily: "var(--font-mono)",
     fontSize: "0.9em",
-    background: "var(--code-bg)",
-    borderRadius: "6px",
-    padding: "12px 16px",
-    margin: "8px 0",
+    background: "color-mix(in srgb, var(--code-bg) 72%, transparent)",
+    padding: "0 14px",
   },
 });

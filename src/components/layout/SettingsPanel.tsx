@@ -1,49 +1,170 @@
+import { Minus, Monitor, Plus, Type, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useAppStore } from "../../stores/app-store";
 
-export function SettingsPanel() {
+interface SettingsDialogProps {
+  open: boolean;
+}
+
+type SettingsSection = "appearance" | "editor";
+
+export function SettingsDialog({ open }: SettingsDialogProps) {
+  const [section, setSection] = useState<SettingsSection>("appearance");
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
+  const zoom = useAppStore((s) => s.zoom);
+  const setZoom = useAppStore((s) => s.setZoom);
+  const zoomIn = useAppStore((s) => s.zoomIn);
+  const zoomOut = useAppStore((s) => s.zoomOut);
+  const resetZoom = useAppStore((s) => s.resetZoom);
+  const toggleSettings = useAppStore((s) => s.toggleSettings);
 
-  const themes: { id: "light" | "dark" | "sepia"; label: string; preview: string }[] = [
-    { id: "light", label: "Light", preview: "#ffffff" },
-    { id: "dark", label: "Dark", preview: "#1e1e1e" },
-    { id: "sepia", label: "Sepia", preview: "#fbf0d9" },
+  useEffect(() => {
+    if (!open) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") toggleSettings();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, toggleSettings]);
+
+  const themes: {
+    id: "light" | "dark" | "sepia";
+    label: string;
+    previewBackground: string;
+    previewInk: string;
+  }[] = [
+    { id: "light", label: "Light", previewBackground: "#ffffff", previewInk: "#1f2937" },
+    { id: "dark", label: "Dark", previewBackground: "#1e1e1e", previewInk: "#f4f4f5" },
+    { id: "sepia", label: "Sepia", previewBackground: "#fbf0d9", previewInk: "#5b4636" },
   ];
 
-  return (
-    <div
-      className="h-full overflow-y-auto border-r select-none"
-      style={{ background: "var(--surface)", borderColor: "var(--border)" }}
-    >
-      <div className="px-4 py-3">
-        <span
-          className="text-xs font-semibold uppercase tracking-wider"
-          style={{ color: "var(--text-secondary)" }}
-        >
-          Settings
-        </span>
-      </div>
+  if (!open) return null;
 
-      <div className="px-3 py-2">
-        <p className="text-xs mb-2" style={{ color: "var(--text-secondary)" }}>
-          Theme
-        </p>
-        <div className="flex gap-2">
-          {themes.map((t) => (
+  return (
+    <div className="settings-backdrop">
+      <div className="settings-window" role="dialog" aria-modal="true" aria-label="Settings">
+        <div className="settings-titlebar" data-tauri-drag-region>
+          <button
+            type="button"
+            className="settings-close-button"
+            aria-label="Close settings"
+            onClick={toggleSettings}
+          >
+            <X size={11} strokeWidth={2.4} />
+          </button>
+          <span className="settings-title">Settings</span>
+          <span className="settings-titlebar-spacer" />
+        </div>
+
+        <div className="settings-body">
+          <nav className="settings-sidebar" aria-label="Settings sections">
             <button
-              key={t.id}
               type="button"
-              onClick={() => setTheme(t.id)}
-              className="flex-1 rounded-lg border-2 p-2 text-center text-xs transition-colors"
-              style={{
-                borderColor: theme === t.id ? "var(--accent)" : "var(--border)",
-                background: t.preview,
-                color: t.id === "dark" ? "#ccc" : "#333",
-              }}
+              className={`settings-nav-item ${section === "appearance" ? "is-active" : ""}`}
+              onClick={() => setSection("appearance")}
             >
-              {t.label}
+              <Monitor size={15} />
+              <span>Appearance</span>
             </button>
-          ))}
+            <button
+              type="button"
+              className={`settings-nav-item ${section === "editor" ? "is-active" : ""}`}
+              onClick={() => setSection("editor")}
+            >
+              <Type size={15} />
+              <span>Editor</span>
+            </button>
+          </nav>
+
+          <div className="settings-pane">
+            {section === "appearance" ? (
+              <>
+                <header className="settings-pane-header">
+                  <h2>Appearance</h2>
+                </header>
+                <section className="settings-group">
+                  <div className="settings-row settings-row-stacked">
+                    <span className="settings-label">Theme</span>
+                    <div className="settings-theme-grid">
+                      {themes.map((t) => (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => setTheme(t.id)}
+                          className={`settings-theme-option ${theme === t.id ? "is-active" : ""}`}
+                        >
+                          <span
+                            className="settings-theme-preview"
+                            style={{
+                              background: t.previewBackground,
+                              color: t.previewInk,
+                            }}
+                          >
+                            <span />
+                            <span />
+                          </span>
+                          <span>{t.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </section>
+              </>
+            ) : (
+              <>
+                <header className="settings-pane-header">
+                  <h2>Editor</h2>
+                </header>
+                <section className="settings-group">
+                  <div className="settings-row">
+                    <span className="settings-label">Zoom</span>
+                    <div className="settings-zoom-control">
+                      <button
+                        type="button"
+                        className="settings-stepper-button"
+                        onClick={zoomOut}
+                        disabled={zoom <= 80}
+                        aria-label="Zoom out"
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        className="settings-zoom-value"
+                        onClick={resetZoom}
+                        disabled={zoom === 100}
+                        title="Actual size"
+                      >
+                        {zoom}%
+                      </button>
+                      <button
+                        type="button"
+                        className="settings-stepper-button"
+                        onClick={zoomIn}
+                        disabled={zoom >= 160}
+                        aria-label="Zoom in"
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  </div>
+                  <input
+                    className="settings-range"
+                    type="range"
+                    min="80"
+                    max="160"
+                    step="10"
+                    value={zoom}
+                    aria-label="Editor zoom"
+                    onChange={(event) => setZoom(Number(event.currentTarget.value))}
+                  />
+                </section>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>

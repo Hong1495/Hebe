@@ -1,6 +1,7 @@
-import { readTextFile } from "@tauri-apps/plugin-fs";
-import { useCallback, useState } from "react";
-import { type SearchResult, searchFulltext } from "../../lib/ipc";
+import { FileText, Loader2, Search } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { readMarkdownFile, type SearchResult, searchFulltext } from "../../lib/ipc";
+import { basename } from "../../lib/path";
 import { useAppStore } from "../../stores/app-store";
 
 interface GlobalSearchProps {
@@ -16,6 +17,43 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [selectedIdx, setSelectedIdx] = useState(0);
+
+  useEffect(() => {
+    if (!open) {
+      setQuery("");
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+
+    if (!folderPath || !query.trim()) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+
+    let cancelled = false;
+    const searchQuery = query.trim();
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const r = await searchFulltext(folderPath, searchQuery);
+        if (!cancelled) {
+          setResults(r);
+          setSelectedIdx(0);
+        }
+      } catch {
+        if (!cancelled) setResults([]);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [folderPath, open, query]);
 
   const handleSearch = useCallback(async () => {
     if (!folderPath || !query.trim()) return;
@@ -34,12 +72,12 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
   const handleSelect = useCallback(
     async (r: SearchResult) => {
       try {
-        const content = await readTextFile(r.path);
+        const content = await readMarkdownFile(r.path);
         openFile(r.path, content);
         addRecentFile(r.path);
         onClose();
-      } catch {
-        // skip
+      } catch (err) {
+        console.error("Failed to open search result:", r.path, err);
       }
     },
     [openFile, addRecentFile, onClose],
@@ -55,94 +93,78 @@ export function GlobalSearch({ open, onClose }: GlobalSearchProps) {
         setSelectedIdx((i) => Math.max(i - 1, 0));
       } else if (e.key === "Enter") {
         e.preventDefault();
-        if (e.shiftKey) {
-          handleSearch();
-        } else if (results[selectedIdx]) {
+        if (results[selectedIdx]) {
           handleSelect(results[selectedIdx]);
         }
       } else if (e.key === "Escape") {
         onClose();
       }
     },
-    [results, selectedIdx, handleSearch, handleSelect, onClose],
+    [results, selectedIdx, handleSelect, onClose],
   );
 
   if (!open) return null;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]"
+      className="command-backdrop fixed inset-0 z-50 flex items-start justify-center pt-[15vh]"
       onClick={onClose}
-      style={{ background: "rgba(0,0,0,0.3)" }}
     >
       <div
-        className="w-[550px] max-h-[420px] rounded-xl shadow-2xl overflow-hidden flex flex-col"
-        style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+        className="command-panel w-[620px] max-h-[480px] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div
-          className="flex items-center gap-2 px-3 py-2 border-b"
-          style={{ borderColor: "var(--border)" }}
-        >
+        <div className="command-input-row">
+          <Search size={17} />
           <input
             autoFocus
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Search in folder... (Shift+Enter to search, Enter to open)"
-            className="flex-1 text-sm outline-none"
-            style={{ background: "transparent", color: "var(--text)" }}
+            placeholder="Search in folder"
           />
+          {searching && <Loader2 className="animate-spin" size={16} />}
           <button
             type="button"
             onClick={handleSearch}
-            className="text-xs px-2 py-1 rounded hover:opacity-80 transition-opacity"
-            style={{ color: "var(--text-secondary)" }}
+            className="toolbar-chip"
           >
             Search
           </button>
         </div>
         <div className="flex-1 overflow-y-auto">
           {!folderPath ? (
-            <div
-              className="px-4 py-8 text-center text-xs"
-              style={{ color: "var(--text-secondary)" }}
-            >
+            <div className="command-empty">
               Open a folder first to search
             </div>
           ) : searching ? (
-            <div
-              className="px-4 py-4 text-center text-xs"
-              style={{ color: "var(--text-secondary)" }}
-            >
+            <div className="command-empty">
               Searching...
             </div>
           ) : results.length === 0 && query ? (
-            <div
-              className="px-4 py-6 text-center text-xs"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              No results. Press Shift+Enter to search.
+            <div className="command-empty">
+              No results
             </div>
           ) : (
             results.map((r, idx) => (
               <button
                 key={r.path}
                 type="button"
-                className="w-full text-left px-4 py-2.5 border-b transition-colors"
-                style={{
-                  background: idx === selectedIdx ? "var(--accent-bg)" : "transparent",
-                  borderColor: "var(--border)",
-                }}
+                className={`command-result command-result-tall ${
+                  idx === selectedIdx ? "is-selected" : ""
+                }`}
                 onClick={() => handleSelect(r)}
                 onMouseEnter={() => setSelectedIdx(idx)}
               >
-                <div className="text-xs truncate" style={{ color: "var(--accent)" }}>
-                  {r.path.split("/").pop()}
-                </div>
-                <div className="text-xs mt-0.5 truncate" style={{ color: "var(--text-secondary)" }}>
-                  {r.snippet}
+                <FileText size={15} />
+                <div className="command-result-stack">
+                  <div className="command-result-title">
+                    {basename(r.path)}
+                  </div>
+                  <div className="command-result-snippet">
+                    {r.snippet}
+                  </div>
                 </div>
               </button>
             ))

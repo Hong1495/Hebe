@@ -1,3 +1,4 @@
+import { Hash, ListTree } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { getHeadingOutline, type Heading } from "../../lib/ipc";
 import { useAppStore } from "../../stores/app-store";
@@ -31,47 +32,32 @@ export function OutlinePanel({ onJump }: OutlinePanelProps) {
   const indentForLevel = useMemo(() => (level: number) => Math.min(level - 1, 4) * 12, []);
 
   return (
-    <div
-      className="h-full overflow-y-auto border-l select-none"
-      style={{
-        background: "var(--surface)",
-        borderColor: "var(--border)",
-      }}
-    >
-      <div
-        className="flex items-center justify-between px-4 py-3 sticky top-0 z-10"
-        style={{ background: "var(--surface)" }}
-      >
-        <span
-          className="text-xs font-semibold uppercase tracking-wider"
-          style={{ color: "var(--text-secondary)" }}
-        >
+    <div className="side-panel h-full overflow-y-auto border-l select-none">
+      <div className="panel-header sticky top-0 z-10">
+        <span>
+          <ListTree size={14} />
           Outline
         </span>
-        <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+        <span className="panel-count">
           {headings.length}
         </span>
       </div>
 
       {headings.length === 0 ? (
-        <div className="px-3 py-8 text-center">
-          <p style={{ color: "var(--text-secondary)" }} className="text-sm">
-            No headings yet
-          </p>
+        <div className="panel-empty">
+          <Hash size={28} />
+          <p>No headings</p>
         </div>
       ) : (
-        <nav className="px-1 py-1">
+        <nav className="outline-list">
           {headings.map((h, i) => (
             <button
               type="button"
               key={`${h.text}-${h.line}-${i}`}
               onClick={() => onJump?.(h.line)}
-              className="w-full text-left px-3 py-1 rounded text-sm truncate transition-colors hover:opacity-80"
+              className={`outline-row level-${Math.min(h.level, 6)}`}
               style={{
                 paddingLeft: `${12 + indentForLevel(h.level)}px`,
-                color: h.level <= 2 ? "var(--text-heading)" : "var(--text-secondary)",
-                fontSize: h.level === 1 ? "13px" : "12px",
-                fontWeight: h.level <= 2 ? 500 : 400,
               }}
               title={h.text}
             >

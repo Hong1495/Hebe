@@ -37,7 +37,9 @@ pub async fn export_document(
     // Drop stdin to close the pipe before waiting
     drop(child.stdin.take());
 
-    let status = child.wait().map_err(|e| format!("Pandoc process error: {e}"))?;
+    let status = child
+        .wait()
+        .map_err(|e| format!("Pandoc process error: {e}"))?;
 
     if status.success() {
         Ok(output_path)

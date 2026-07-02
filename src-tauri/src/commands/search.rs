@@ -28,6 +28,40 @@ struct SearchCache {
 
 static SEARCH_CACHE: Mutex<SearchCache> = Mutex::new(SearchCache { state: None });
 
+fn should_skip_dir(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .map(|name| {
+            name.starts_with('.')
+                || matches!(
+                    name,
+                    "node_modules" | "target" | "dist" | "build" | ".turbo"
+                )
+        })
+        .unwrap_or(false)
+}
+
+fn is_markdown_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "md" | "markdown" | "mdx" | "mkd" | "mkdn"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn snippet_for(body: &str, max_chars: usize) -> String {
+    let mut chars = body.chars();
+    let mut snippet: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        snippet.push_str("...");
+    }
+    snippet
+}
+
 fn build_index(folder_path: &str) -> Result<SearchState, String> {
     let mut schema_builder = tantivy::schema::Schema::builder();
     let text_indexing = TextFieldIndexing::default()
@@ -62,8 +96,7 @@ fn build_index(folder_path: &str) -> Result<SearchState, String> {
         path_field: tantivy::schema::Field,
         error_count: &mut u32,
     ) -> Result<u64, String> {
-        let entries =
-            std::fs::read_dir(dir).map_err(|e| format!("Failed to read dir: {e}"))?;
+        let entries = std::fs::read_dir(dir).map_err(|e| format!("Failed to read dir: {e}"))?;
         let mut count = 0u64;
 
         for entry in entries {
@@ -77,12 +110,18 @@ fn build_index(folder_path: &str) -> Result<SearchState, String> {
             };
             let path = entry.path();
             if path.is_dir() {
-                let name = path.file_name().unwrap_or_default().to_string_lossy();
-                if name.starts_with('.') || name == "node_modules" || name == "target" {
+                if should_skip_dir(&path) {
                     continue;
                 }
-                count += walk(&path, writer, title_field, body_field, path_field, error_count)?;
-            } else if path.extension().map_or(false, |e| e == "md") {
+                count += walk(
+                    &path,
+                    writer,
+                    title_field,
+                    body_field,
+                    path_field,
+                    error_count,
+                )?;
+            } else if is_markdown_path(&path) {
                 let content = std::fs::read_to_string(&path).unwrap_or_default();
                 let title = extract_title(&content);
                 let plain = markdown_to_plain(&content);
@@ -209,11 +248,7 @@ pub fn search_fulltext(
             .unwrap_or("")
             .to_string();
 
-        let snippet = if body.len() > 200 {
-            format!("{}...", &body[..200])
-        } else {
-            body
-        };
+        let snippet = snippet_for(&body, 200);
 
         results.push(SearchResult { path, snippet });
     }

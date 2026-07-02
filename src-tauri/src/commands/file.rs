@@ -1,5 +1,6 @@
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use serde::Serialize;
+use std::time::UNIX_EPOCH;
 
 #[tauri::command]
 pub fn read_markdown_file(path: String) -> Result<String, String> {
@@ -9,6 +10,18 @@ pub fn read_markdown_file(path: String) -> Result<String, String> {
 #[tauri::command]
 pub fn write_markdown_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, &content).map_err(|e| format!("Failed to write file: {e}"))
+}
+
+#[tauri::command]
+pub fn get_file_mtime(path: String) -> Result<u64, String> {
+    let modified = std::fs::metadata(&path)
+        .and_then(|metadata| metadata.modified())
+        .map_err(|e| format!("Failed to read file metadata: {e}"))?;
+
+    modified
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .map_err(|e| format!("Invalid file modified time: {e}"))
 }
 
 #[derive(Debug, Serialize)]
@@ -39,7 +52,10 @@ pub fn get_heading_outline(content: String) -> Vec<Heading> {
             }
             Event::End(TagEnd::Heading { .. }) => {
                 if let Some((level, text)) = current_heading.take() {
-                    let line = content[..range.start].chars().filter(|&c| c == '\n').count();
+                    let line = content[..range.start]
+                        .chars()
+                        .filter(|&c| c == '\n')
+                        .count();
                     headings.push(Heading { text, level, line });
                 }
             }

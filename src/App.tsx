@@ -1,31 +1,195 @@
 import { EditorView } from "@codemirror/view";
-import { useEffect, useMemo, useRef } from "react";
+import { setTheme as setAppTheme } from "@tauri-apps/api/app";
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { EditorArea } from "./components/layout/EditorArea";
 import { OutlinePanel } from "./components/layout/OutlinePanel";
-import { SettingsPanel } from "./components/layout/SettingsPanel";
+import { SettingsDialog } from "./components/layout/SettingsPanel";
 import { Sidebar } from "./components/layout/Sidebar";
 import { StatusBar } from "./components/layout/StatusBar";
+import { TabBar } from "./components/layout/TabBar";
+import { isTauriRuntime, readMarkdownFile, takePendingOpenFiles } from "./lib/ipc";
 import { useAppStore } from "./stores/app-store";
+
+const MARKDOWN_FILE_RE = /\.(md|markdown|mdx|mkd|mkdn)$/i;
+
+const WINDOW_BACKGROUND: Record<"light" | "dark" | "sepia", string> = {
+  light: "#ffffff",
+  dark: "#1e1e1e",
+  sepia: "#fbf0d9",
+};
 
 function App() {
   const sidebarVisible = useAppStore((s) => s.sidebarVisible);
   const outlineVisible = useAppStore((s) => s.outlineVisible);
   const settingsVisible = useAppStore((s) => s.settingsVisible);
+  const sidebarWidth = useAppStore((s) => s.sidebarWidth);
+  const outlineWidth = useAppStore((s) => s.outlineWidth);
+  const setSidebarWidth = useAppStore((s) => s.setSidebarWidth);
+  const setOutlineWidth = useAppStore((s) => s.setOutlineWidth);
+  const openFile = useAppStore((s) => s.openFile);
+  const addRecentFile = useAppStore((s) => s.addRecentFile);
+  const recentFiles = useAppStore((s) => s.recentFiles);
+  const setRecentFiles = useAppStore((s) => s.setRecentFiles);
   const theme = useAppStore((s) => s.theme);
+  const zoom = useAppStore((s) => s.zoom);
   const editorViewRef = useRef<EditorView | null>(null);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
+    document.documentElement.style.colorScheme = theme === "dark" ? "dark" : "light";
+    if (!isTauriRuntime()) return;
+    try {
+      const nativeTheme = theme === "dark" ? "dark" : "light";
+      const currentWindow = getCurrentWindow();
+      void Promise.allSettled([
+        currentWindow.setTheme(nativeTheme),
+        currentWindow.setBackgroundColor(WINDOW_BACKGROUND[theme]),
+        setAppTheme(nativeTheme),
+      ]);
+    } catch {
+      // ignore unsupported window theme calls
+    }
   }, [theme]);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty("--editor-zoom", String(zoom / 100));
+  }, [zoom]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const restoreRecentFile = async () => {
+      for (const filePath of recentFiles) {
+        try {
+          const content = await readMarkdownFile(filePath);
+          if (cancelled) return;
+          const { tabs, activeTabIndex } = useAppStore.getState();
+          const activeTab = tabs[activeTabIndex];
+          if (tabs.length !== 1 || activeTab?.path || activeTab?.dirty || activeTab?.content) {
+            return;
+          }
+          openFile(filePath, content);
+          addRecentFile(filePath);
+          return;
+        } catch {
+          // Try the next recent file.
+        }
+      }
+
+      if (!cancelled && recentFiles.length > 0) {
+        setRecentFiles([]);
+      }
+    };
+
+    void restoreRecentFile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const openMarkdownFiles = useCallback(async (paths: string[], isCancelled: () => boolean) => {
+    const markdownPaths = paths.filter((path) => MARKDOWN_FILE_RE.test(path));
+    for (const filePath of markdownPaths) {
+      try {
+        const content = await readMarkdownFile(filePath);
+        if (isCancelled()) return;
+        useAppStore.getState().openFile(filePath, content);
+        useAppStore.getState().addRecentFile(filePath);
+      } catch (err) {
+        console.error("Failed to open file:", filePath, err);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+
+    let currentWindow: ReturnType<typeof getCurrentWindow>;
+    try {
+      currentWindow = getCurrentWindow();
+    } catch {
+      return;
+    }
+
+    currentWindow
+      .onDragDropEvent(async (event) => {
+        if (event.payload.type !== "drop") return;
+        await openMarkdownFiles(event.payload.paths, () => cancelled);
+      })
+      .then((stop) => {
+        if (cancelled) {
+          stop();
+          return;
+        }
+        unlisten = stop;
+      })
+      .catch(() => {
+        // ignore in non-tauri contexts
+      });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [openMarkdownFiles]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+
+    const setupOpenListener = async () => {
+      try {
+        unlisten = await listen<string[]>("open-files", async (event) => {
+          await openMarkdownFiles(event.payload, () => cancelled);
+        });
+        const pending = await takePendingOpenFiles();
+        await openMarkdownFiles(pending, () => cancelled);
+      } catch {
+        // ignore listener setup failure in non-runtime contexts
+      }
+    };
+
+    void setupOpenListener();
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [openMarkdownFiles]);
 
   const gridCols = useMemo(() => {
     const cols = [];
-    if (settingsVisible) cols.push("var(--sidebar-width)");
-    else if (sidebarVisible) cols.push("var(--sidebar-width)");
+    if (sidebarVisible) cols.push(`${sidebarWidth}px`, "4px");
     cols.push("1fr");
-    if (outlineVisible) cols.push("var(--outline-width)");
+    if (outlineVisible) cols.push("4px", `${outlineWidth}px`);
     return cols.join(" ");
-  }, [sidebarVisible, outlineVisible, settingsVisible]);
+  }, [sidebarVisible, outlineVisible, sidebarWidth, outlineWidth]);
+
+  const beginResize = (side: "left" | "right", startX: number) => {
+    const initialWidth = side === "left" ? sidebarWidth : outlineWidth;
+
+    const handleMove = (event: MouseEvent) => {
+      const delta = event.clientX - startX;
+      if (side === "left") setSidebarWidth(initialWidth + delta);
+      else setOutlineWidth(initialWidth - delta);
+    };
+
+    const handleUp = () => {
+      document.body.classList.remove("is-resizing-panel");
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+
+    document.body.classList.add("is-resizing-panel");
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+  };
 
   const handleOutlineJump = (line: number) => {
     const view = editorViewRef.current;
@@ -40,16 +204,40 @@ function App() {
   };
 
   return (
-    <div className="h-full flex flex-col" style={{ background: "var(--bg)", color: "var(--text)" }}>
-      <div className="flex-1 grid overflow-hidden" style={{ gridTemplateColumns: gridCols }}>
-        {settingsVisible ? <SettingsPanel /> : sidebarVisible ? <Sidebar /> : null}
-        <EditorArea
-          onEditorViewReady={(v) => {
-            editorViewRef.current = v;
-          }}
-        />
-        {outlineVisible && <OutlinePanel onJump={handleOutlineJump} />}
+    <div className="app-shell" style={{ background: "var(--bg)", color: "var(--text)" }}>
+      <TabBar />
+      <div className="app-body" style={{ gridTemplateColumns: gridCols }}>
+        {sidebarVisible && (
+          <div className="app-rail">
+            <Sidebar />
+          </div>
+        )}
+        {sidebarVisible && (
+          <div
+            className="panel-resizer panel-resizer-left"
+            onMouseDown={(event) => beginResize("left", event.clientX)}
+          />
+        )}
+        <div className="app-main">
+          <EditorArea
+            onEditorViewReady={(v) => {
+              editorViewRef.current = v;
+            }}
+          />
+        </div>
+        {outlineVisible && (
+          <div
+            className="panel-resizer panel-resizer-right"
+            onMouseDown={(event) => beginResize("right", event.clientX)}
+          />
+        )}
+        {outlineVisible && (
+          <div className="app-rail">
+            <OutlinePanel onJump={handleOutlineJump} />
+          </div>
+        )}
       </div>
+      <SettingsDialog open={settingsVisible} />
       <StatusBar />
     </div>
   );

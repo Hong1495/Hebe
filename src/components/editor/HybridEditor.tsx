@@ -1,8 +1,6 @@
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { defaultHighlightStyle, HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { languages } from "@codemirror/language-data";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
@@ -12,24 +10,33 @@ import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "../../stores/app-store";
 import { blockWidgetPlugin } from "./extensions/block-widgets";
 import {
+  clickRevealPlugin,
+  editorFocusedField,
+  editorFocusPlugin,
   hybridBaseTheme,
   inlinePreviewPlugin,
-  mouseSelectingField,
   pasteImagePlugin,
-  setMouseSelecting,
+  previewRevealRangeField,
 } from "./extensions/hybrid-preview";
 
 type ThemeKey = "light" | "dark" | "sepia";
 
 const sepiaHighlightStyle = HighlightStyle.define([
-  { tag: tags.heading, color: "#3c2f20", fontWeight: "bold" },
+  { tag: tags.heading1, class: "md-heading-1" },
+  { tag: tags.heading2, class: "md-heading-2" },
+  { tag: tags.heading3, class: "md-heading-3" },
+  { tag: tags.heading, class: "md-heading" },
   { tag: tags.keyword, color: "#8b5e3c" },
   { tag: tags.string, color: "#5d7a4a" },
   { tag: tags.comment, color: "#a09080", fontStyle: "italic" },
   { tag: tags.meta, color: "#b85c38" },
-  { tag: tags.link, color: "#6e5a3f", textDecoration: "underline" },
-  { tag: tags.emphasis, fontStyle: "italic" },
-  { tag: tags.strong, fontWeight: "bold" },
+  { tag: tags.link, class: "md-link" },
+  { tag: tags.url, class: "md-url" },
+  { tag: tags.emphasis, class: "md-emphasis" },
+  { tag: tags.strong, class: "md-strong" },
+  { tag: tags.monospace, class: "md-code" },
+  { tag: tags.quote, class: "md-quote" },
+  { tag: tags.list, class: "md-list" },
   { tag: tags.atom, color: "#9b6b3c" },
   { tag: tags.bool, color: "#a0522d" },
   { tag: tags.number, color: "#8b5e3c" },
@@ -39,10 +46,29 @@ const sepiaHighlightStyle = HighlightStyle.define([
   { tag: tags.url, color: "#6e5a3f", textDecoration: "underline" },
 ]);
 
+const markdownHighlightStyle = HighlightStyle.define([
+  { tag: tags.heading1, class: "md-heading-1" },
+  { tag: tags.heading2, class: "md-heading-2" },
+  { tag: tags.heading3, class: "md-heading-3" },
+  { tag: tags.heading, class: "md-heading" },
+  { tag: tags.strong, class: "md-strong" },
+  { tag: tags.emphasis, class: "md-emphasis" },
+  { tag: tags.link, class: "md-link" },
+  { tag: tags.url, class: "md-url" },
+  { tag: tags.monospace, class: "md-code" },
+  { tag: tags.quote, class: "md-quote" },
+  { tag: tags.list, class: "md-list" },
+  { tag: tags.contentSeparator, class: "md-separator" },
+  { tag: tags.processingInstruction, class: "md-mark" },
+  { tag: tags.meta, class: "md-mark" },
+  { tag: tags.labelName, class: "md-mark" },
+]);
+
 interface HybridEditorProps {
   initialContent?: string;
   onContentChange?: (content: string) => void;
   onOpenFile?: () => void;
+  onNewDocument?: () => void;
   onSaveFile?: () => void;
   onQuickOpen?: () => void;
   onGlobalSearch?: () => void;
@@ -61,7 +87,7 @@ function themeExtension(key: ThemeKey): Extension {
     case "sepia":
       return [syntaxHighlighting(sepiaHighlightStyle)];
     default:
-      return [syntaxHighlighting(defaultHighlightStyle)];
+      return [syntaxHighlighting(markdownHighlightStyle)];
   }
 }
 
@@ -69,6 +95,7 @@ export function HybridEditor({
   initialContent = "",
   onContentChange,
   onOpenFile,
+  onNewDocument,
   onSaveFile,
   onQuickOpen,
   onGlobalSearch,
@@ -79,6 +106,7 @@ export function HybridEditor({
 }: HybridEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const didMountThemeRef = useRef(false);
   const theme = useAppStore((s) => s.theme);
   const [isReady, setIsReady] = useState(false);
 
@@ -92,6 +120,13 @@ export function HybridEditor({
     });
 
     const editorKeymap = keymap.of([
+      {
+        key: "Mod-n",
+        run: () => {
+          onNewDocument?.();
+          return true;
+        },
+      },
       {
         key: "Mod-o",
         run: () => {
@@ -130,27 +165,19 @@ export function HybridEditor({
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, ...closeBracketsKeymap]),
       editorKeymap,
 
-      markdown({ base: markdownLanguage, codeLanguages: languages }),
-
       hybridBaseTheme,
+      editorFocusPlugin,
+      editorFocusedField,
+      previewRevealRangeField,
       inlinePreviewPlugin,
-      blockWidgetPlugin,
-      mouseSelectingField,
+      clickRevealPlugin,
+      blockWidgetPlugin(mdPath ?? null),
 
       pasteImagePlugin(mdPath ?? null),
 
       themeCompartment.of(themeExtension(theme)),
 
       updateContent,
-
-      EditorView.domEventHandlers({
-        mousedown() {
-          viewRef.current?.dispatch({ effects: setMouseSelecting.of(true) });
-        },
-        mouseup() {
-          viewRef.current?.dispatch({ effects: setMouseSelecting.of(false) });
-        },
-      }),
     ];
 
     const state = EditorState.create({ doc: initialContent, extensions });
@@ -168,6 +195,10 @@ export function HybridEditor({
   }, []);
 
   useEffect(() => {
+    if (!didMountThemeRef.current) {
+      didMountThemeRef.current = true;
+      return;
+    }
     if (!viewRef.current) return;
     viewRef.current.dispatch({
       effects: themeCompartment.reconfigure(themeExtension(theme)),

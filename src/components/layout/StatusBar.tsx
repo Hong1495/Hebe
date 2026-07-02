@@ -1,52 +1,56 @@
+import { Minus, Plus } from "lucide-react";
 import { useAppStore } from "../../stores/app-store";
 
 export function StatusBar() {
-  const currentFilePath = useAppStore((s) => s.currentFilePath());
+  const currentContent = useAppStore((s) => s.currentContent());
   const focusMode = useAppStore((s) => s.focusMode);
   const typewriterMode = useAppStore((s) => s.typewriterMode);
-  const toggleSettings = useAppStore((s) => s.toggleSettings);
+  const zoom = useAppStore((s) => s.zoom);
+  const zoomIn = useAppStore((s) => s.zoomIn);
+  const zoomOut = useAppStore((s) => s.zoomOut);
+  const resetZoom = useAppStore((s) => s.resetZoom);
+  const lineCount = currentContent ? currentContent.split("\n").length : 1;
+  const wordCount = currentContent.trim() ? currentContent.trim().split(/\s+/).length : 0;
 
   return (
     <div
-      className="flex items-center justify-between px-3 py-1 text-xs border-t select-none"
-      style={{
-        background: "var(--surface)",
-        borderColor: "var(--border)",
-        color: "var(--text-secondary)",
-      }}
+      className="status-bar flex items-center justify-between px-2 text-xs select-none"
+      style={{ color: "var(--text-secondary)" }}
     >
-      <div className="flex items-center gap-3">
+      <div className="status-cluster">
+        <span className="status-meta">{lineCount} lines</span>
+        <span className="status-meta">{wordCount} words</span>
+      </div>
+      <div className="status-cluster">
+        {focusMode && <span className="status-pill">Focus</span>}
+        {typewriterMode && <span className="status-pill">Typewriter</span>}
         <button
           type="button"
-          onClick={toggleSettings}
-          className="hover:opacity-80 transition-opacity"
+          className="status-icon-button"
+          onClick={zoomOut}
+          disabled={zoom <= 80}
+          title="Zoom out"
         >
-          ⚙
+          <Minus size={13} />
         </button>
-        <span>{currentFilePath ?? "Untitled"}</span>
-        {currentFilePath && (
-          <span className="w-2 h-2 rounded-full" style={{ background: "var(--accent)" }} />
-        )}
-      </div>
-      <div className="flex items-center gap-3">
-        {focusMode && (
-          <span
-            className="px-1.5 py-0.5 rounded text-xs"
-            style={{ background: "var(--accent-bg)", color: "var(--accent)" }}
-          >
-            Focus
-          </span>
-        )}
-        {typewriterMode && (
-          <span
-            className="px-1.5 py-0.5 rounded text-xs"
-            style={{ background: "var(--accent-bg)", color: "var(--accent)" }}
-          >
-            Typewriter
-          </span>
-        )}
-        <span>UTF-8</span>
-        <span>Markdown</span>
+        <button
+          type="button"
+          className="status-zoom"
+          onClick={resetZoom}
+          disabled={zoom === 100}
+          title="Actual size"
+        >
+          {zoom}%
+        </button>
+        <button
+          type="button"
+          className="status-icon-button"
+          onClick={zoomIn}
+          disabled={zoom >= 160}
+          title="Zoom in"
+        >
+          <Plus size={13} />
+        </button>
       </div>
     </div>
   );

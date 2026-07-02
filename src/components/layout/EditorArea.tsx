@@ -1,13 +1,18 @@
 import { EditorView } from "@codemirror/view";
+import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { readTextFile, stat, writeTextFile } from "@tauri-apps/plugin-fs";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { exportDocument } from "../../lib/ipc";
+import {
+  exportDocument,
+  getFileMtime,
+  isTauriRuntime,
+  readMarkdownFile,
+  writeMarkdownFile,
+} from "../../lib/ipc";
 import { useAppStore } from "../../stores/app-store";
 import { HybridEditor } from "../editor/HybridEditor";
 import { GlobalSearch } from "./GlobalSearch";
 import { QuickOpen } from "./QuickOpen";
-import { TabBar } from "./TabBar";
 
 const AUTO_SAVE_DELAY = 3000;
 
@@ -21,80 +26,43 @@ export function EditorArea({ onEditorViewReady }: Props) {
   const activeTab = tabs[activeTabIndex];
   const currentFilePath = activeTab?.path ?? null;
   const currentContent = activeTab?.content ?? "";
+  const activeTabDirty = activeTab?.dirty ?? false;
 
   const setFolderPath = useAppStore((s) => s.setFolderPath);
   const addRecentFile = useAppStore((s) => s.addRecentFile);
-  const recentFiles = useAppStore((s) => s.recentFiles);
-  const focusMode = useAppStore((s) => s.focusMode);
-  const typewriterMode = useAppStore((s) => s.typewriterMode);
+  const toggleSidebar = useAppStore((s) => s.toggleSidebar);
+  const toggleOutline = useAppStore((s) => s.toggleOutline);
+  const toggleSettings = useAppStore((s) => s.toggleSettings);
   const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
   const toggleTypewriterMode = useAppStore((s) => s.toggleTypewriterMode);
+  const zoomIn = useAppStore((s) => s.zoomIn);
+  const zoomOut = useAppStore((s) => s.zoomOut);
+  const resetZoom = useAppStore((s) => s.resetZoom);
   const openNewTab = useAppStore((s) => s.openNewTab);
   const openFile = useAppStore((s) => s.openFile);
   const updateActiveContent = useAppStore((s) => s.updateActiveContent);
   const setTabContent = useAppStore((s) => s.setTabContent);
+  const setTabDirty = useAppStore((s) => s.setTabDirty);
+  const setActiveTabPath = useAppStore((s) => s.setActiveTabPath);
+  const focusMode = useAppStore((s) => s.focusMode);
+  const typewriterMode = useAppStore((s) => s.typewriterMode);
 
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
   const [globalSearchVisible, setGlobalSearchVisible] = useState(false);
   const editorViewRef = useRef<EditorView | null>(null);
-  const dirtyRef = useRef(false);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
+  const focusEditorSoon = useCallback(() => {
+    window.setTimeout(() => editorViewRef.current?.focus(), 150);
+  }, []);
   const handleContentChange = useCallback(
     (content: string) => {
       updateActiveContent(content);
-      dirtyRef.current = true;
     },
     [updateActiveContent],
   );
 
-  // Auto-save
-  useEffect(() => {
-    if (!dirtyRef.current || !currentFilePath) return;
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    autoSaveTimerRef.current = setTimeout(async () => {
-      try {
-        await writeTextFile(currentFilePath, currentContent);
-        dirtyRef.current = false;
-      } catch {
-        // silently can't save
-      }
-    }, AUTO_SAVE_DELAY);
-    return () => {
-      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    };
-  }, [currentContent, currentFilePath]);
-
-  // File watching
-  useEffect(() => {
-    if (!currentFilePath) return;
-    let lastMtime = 0;
-    let cancelled = false;
-    async function check() {
-      if (cancelled) return;
-      try {
-        const info = await stat(currentFilePath!);
-        const mtime = info.mtime?.getTime() ?? 0;
-        if (lastMtime === 0) {
-          lastMtime = mtime;
-        } else if (mtime > lastMtime + 500 && !dirtyRef.current) {
-          lastMtime = mtime;
-          const content = await readTextFile(currentFilePath!);
-          setTabContent(activeTabIndex, content);
-        }
-      } catch {
-        // file may be deleted
-      }
-    }
-    check();
-    const interval = setInterval(check, 2000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [currentFilePath, activeTabIndex, setTabContent]);
-
   const handleOpenFile = useCallback(async () => {
+    if (!isTauriRuntime()) return;
     try {
       const selected = await open({
         multiple: false,
@@ -104,17 +72,20 @@ export function EditorArea({ onEditorViewReady }: Props) {
         ],
       });
       if (selected) {
-        const content = await readTextFile(selected);
-        openFile(selected, content);
-        addRecentFile(selected);
-        dirtyRef.current = false;
+        const filePath = Array.isArray(selected) ? selected[0] : selected;
+        if (!filePath) return;
+        const content = await readMarkdownFile(filePath);
+        openFile(filePath, content);
+        addRecentFile(filePath);
+        focusEditorSoon();
       }
     } catch (err) {
       console.error("Failed to open file:", err);
     }
-  }, [openFile, addRecentFile]);
+  }, [openFile, addRecentFile, focusEditorSoon]);
 
   const handleOpenFolder = useCallback(async () => {
+    if (!isTauriRuntime()) return;
     try {
       const selected = await open({ directory: true, multiple: false });
       if (selected) setFolderPath(selected);
@@ -124,10 +95,17 @@ export function EditorArea({ onEditorViewReady }: Props) {
   }, [setFolderPath]);
 
   const handleSaveFile = useCallback(async () => {
+    if (!isTauriRuntime()) return;
     try {
       if (currentFilePath) {
-        await writeTextFile(currentFilePath, currentContent);
-        dirtyRef.current = false;
+        const saveIndex = activeTabIndex;
+        const savePath = currentFilePath;
+        const saveContent = currentContent;
+        await writeMarkdownFile(savePath, saveContent);
+        const latestTab = useAppStore.getState().tabs[saveIndex];
+        if (latestTab?.path === savePath && latestTab.content === saveContent) {
+          setTabDirty(saveIndex, false);
+        }
         return;
       }
       const savePath = await save({
@@ -135,21 +113,27 @@ export function EditorArea({ onEditorViewReady }: Props) {
         defaultPath: "untitled.md",
       });
       if (savePath) {
-        await writeTextFile(savePath, currentContent);
-        openFile(savePath, currentContent);
+        await writeMarkdownFile(savePath, currentContent);
+        setActiveTabPath(savePath);
         addRecentFile(savePath);
-        dirtyRef.current = false;
       }
     } catch (err) {
       console.error("Failed to save file:", err);
     }
-  }, [currentFilePath, currentContent, openFile, addRecentFile]);
+  }, [
+    activeTabIndex,
+    currentFilePath,
+    currentContent,
+    setTabDirty,
+    setActiveTabPath,
+    addRecentFile,
+  ]);
 
   const handleExport = useCallback(
     async (format: "pdf" | "docx" | "html" | "epub") => {
+      if (!isTauriRuntime()) return;
       if (!currentFilePath) {
         await handleSaveFile();
-        // Re-read path: handleSaveFile may have assigned a path via save-as
         const savedPath = useAppStore.getState().currentFilePath();
         if (!savedPath) return;
         try {
@@ -170,182 +154,177 @@ export function EditorArea({ onEditorViewReady }: Props) {
     [currentFilePath, currentContent, handleSaveFile],
   );
 
+  // Auto-save
+  useEffect(() => {
+    if (!activeTabDirty || !currentFilePath) return;
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    const saveIndex = activeTabIndex;
+    const savePath = currentFilePath;
+    const saveContent = currentContent;
+    autoSaveTimerRef.current = setTimeout(async () => {
+      try {
+        await writeMarkdownFile(savePath, saveContent);
+        const latestTab = useAppStore.getState().tabs[saveIndex];
+        if (latestTab?.path === savePath && latestTab.content === saveContent) {
+          setTabDirty(saveIndex, false);
+        }
+      } catch {
+        // silently can't save
+      }
+    }, AUTO_SAVE_DELAY);
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [activeTabDirty, activeTabIndex, currentContent, currentFilePath, setTabDirty]);
+
+  // File watching
+  useEffect(() => {
+    if (!currentFilePath) return;
+    let lastMtime = 0;
+    let cancelled = false;
+    async function check() {
+      if (cancelled) return;
+      try {
+        const mtime = await getFileMtime(currentFilePath!);
+        if (lastMtime === 0) {
+          lastMtime = mtime;
+        } else if (mtime > lastMtime + 500 && !useAppStore.getState().tabs[activeTabIndex]?.dirty) {
+          lastMtime = mtime;
+          const content = await readMarkdownFile(currentFilePath!);
+          setTabContent(activeTabIndex, content);
+        }
+      } catch {
+        // file may be deleted
+      }
+    }
+    check();
+    const interval = setInterval(check, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [currentFilePath, activeTabIndex, setTabContent]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+
+    const setupListener = async () => {
+      try {
+        unlisten = await listen<string>("menu-action", async (event) => {
+          if (cancelled) return;
+
+          switch (event.payload) {
+            case "open-file":
+              await handleOpenFile();
+              break;
+            case "open-folder":
+              await handleOpenFolder();
+              break;
+            case "new-document":
+              openNewTab("");
+              focusEditorSoon();
+              break;
+            case "save-file":
+              await handleSaveFile();
+              break;
+            case "export-pdf":
+              await handleExport("pdf");
+              break;
+            case "export-docx":
+              await handleExport("docx");
+              break;
+            case "export-html":
+              await handleExport("html");
+              break;
+            case "export-epub":
+              await handleExport("epub");
+              break;
+            case "quick-open":
+              setQuickOpenVisible(true);
+              break;
+            case "global-search":
+              setGlobalSearchVisible(true);
+              break;
+            case "toggle-sidebar":
+              toggleSidebar();
+              break;
+            case "toggle-outline":
+              toggleOutline();
+              break;
+            case "toggle-settings":
+              toggleSettings();
+              break;
+            case "toggle-focus":
+              toggleFocusMode();
+              break;
+            case "toggle-typewriter":
+              toggleTypewriterMode();
+              break;
+            case "zoom-in":
+              zoomIn();
+              break;
+            case "zoom-out":
+              zoomOut();
+              break;
+            case "zoom-reset":
+              resetZoom();
+              break;
+          }
+        });
+        if (cancelled) {
+          unlisten();
+        }
+      } catch {
+        // ignore listener setup failure in non-runtime contexts
+      }
+    };
+
+    void setupListener();
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [
+    handleOpenFile,
+    handleOpenFolder,
+    handleSaveFile,
+    handleExport,
+    openNewTab,
+    focusEditorSoon,
+    toggleSidebar,
+    toggleOutline,
+    toggleSettings,
+    toggleFocusMode,
+    toggleTypewriterMode,
+    zoomIn,
+    zoomOut,
+    resetZoom,
+  ]);
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      {/* Toolbar */}
-      <div
-        className="flex items-center gap-2 px-3 py-1.5 border-b shrink-0"
-        style={{ borderColor: "var(--border)", background: "var(--surface)" }}
-      >
-        <button
-          type="button"
-          onClick={handleOpenFile}
-          className="text-xs px-2 py-1 rounded hover:opacity-80 transition-opacity"
-          style={{ color: "var(--text-secondary)" }}
-        >
-          Open
-        </button>
-        <button
-          type="button"
-          onClick={handleOpenFolder}
-          className="text-xs px-2 py-1 rounded hover:opacity-80 transition-opacity"
-          style={{ color: "var(--text-secondary)" }}
-        >
-          Folder
-        </button>
-        <button
-          type="button"
-          onClick={handleSaveFile}
-          className="text-xs px-2 py-1 rounded hover:opacity-80 transition-opacity"
-          style={{ color: "var(--text-secondary)" }}
-        >
-          Save
-        </button>
-        <div className="w-px h-4 mx-1" style={{ background: "var(--border)" }} />
-        <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-          Export:
-        </span>
-        {(["pdf", "docx", "html", "epub"] as const).map((fmt) => (
-          <button
-            key={fmt}
-            type="button"
-            onClick={() => handleExport(fmt)}
-            className="text-xs px-1.5 py-0.5 rounded hover:opacity-80 transition-opacity"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            {fmt.toUpperCase()}
-          </button>
-        ))}
-        <div className="w-px h-4 mx-1" style={{ background: "var(--border)" }} />
-        <button
-          type="button"
-          onClick={toggleFocusMode}
-          className="text-xs px-2 py-1 rounded hover:opacity-80 transition-opacity"
-          style={{
-            background: focusMode ? "var(--accent-bg)" : "transparent",
-            color: focusMode ? "var(--accent)" : "var(--text-secondary)",
-          }}
-        >
-          Focus
-        </button>
-        <button
-          type="button"
-          onClick={toggleTypewriterMode}
-          className="text-xs px-2 py-1 rounded hover:opacity-80 transition-opacity"
-          style={{
-            background: typewriterMode ? "var(--accent-bg)" : "transparent",
-            color: typewriterMode ? "var(--accent)" : "var(--text-secondary)",
-          }}
-        >
-          Typewriter
-        </button>
-        <div className="flex-1" />
-        <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-          Cmd+Shift+F Search
-        </span>
-        <span className="text-xs ml-2" style={{ color: "var(--text-secondary)" }}>
-          Cmd+P
-        </span>
-        {currentFilePath && (
-          <span
-            className="text-xs truncate max-w-[300px]"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            {currentFilePath.split("/").pop()}
-          </span>
-        )}
-      </div>
-
-      {/* Tab bar */}
-      <TabBar />
-
-      {/* Editor */}
       <div className="flex-1 overflow-hidden">
-        {currentFilePath || currentContent ? (
-          <HybridEditor
-            mdPath={currentFilePath}
-            key={`${activeTabIndex}-${activeTab?.path ?? "new"}`}
-            initialContent={currentContent}
-            onContentChange={handleContentChange}
-            onOpenFile={handleOpenFile}
-            onSaveFile={handleSaveFile}
-            onQuickOpen={() => setQuickOpenVisible(true)}
-            onGlobalSearch={() => setGlobalSearchVisible(true)}
-            onEditorView={(v) => {
-              editorViewRef.current = v;
-              onEditorViewReady?.(v);
-            }}
-            focusMode={focusMode}
-            typewriterMode={typewriterMode}
-          />
-        ) : (
-          <div className="flex items-center justify-center h-full overflow-y-auto">
-            <div className="text-center space-y-4 py-12">
-              <h1 className="text-3xl font-bold" style={{ color: "var(--text-heading)" }}>
-                Hebe
-              </h1>
-              <p style={{ color: "var(--text-secondary)" }}>
-                A next-generation WYSIWYG Markdown editor
-              </p>
-              <div className="flex gap-3 justify-center">
-                <button
-                  type="button"
-                  onClick={handleOpenFile}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-white"
-                  style={{ background: "var(--accent)" }}
-                >
-                  Open File
-                </button>
-                <button
-                  type="button"
-                  onClick={handleOpenFolder}
-                  className="px-4 py-2 rounded-lg text-sm font-medium"
-                  style={{ background: "var(--accent-bg)", color: "var(--accent)" }}
-                >
-                  Open Folder
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openNewTab("# Untitled\n\n")}
-                  className="px-4 py-2 rounded-lg text-sm font-medium"
-                  style={{ background: "var(--accent-bg)", color: "var(--accent)" }}
-                >
-                  New Document
-                </button>
-              </div>
-
-              {recentFiles.length > 0 && (
-                <div className="pt-6">
-                  <p className="text-xs mb-3" style={{ color: "var(--text-secondary)" }}>
-                    Recent Files
-                  </p>
-                  <div className="flex flex-col gap-1 items-center">
-                    {recentFiles.map((path) => (
-                      <button
-                        key={path}
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            const content = await readTextFile(path);
-                            openFile(path, content);
-                            addRecentFile(path);
-                          } catch {
-                            // gone
-                          }
-                        }}
-                        className="text-sm px-3 py-1 rounded hover:opacity-80 transition-opacity truncate max-w-[400px]"
-                        style={{ color: "var(--text-secondary)" }}
-                        title={path}
-                      >
-                        {path.split("/").pop()}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+        <HybridEditor
+          mdPath={currentFilePath}
+          key={`${activeTabIndex}-${activeTab?.path ?? "new"}`}
+          initialContent={currentContent}
+          onContentChange={handleContentChange}
+          onNewDocument={() => openNewTab("")}
+          onOpenFile={handleOpenFile}
+          onSaveFile={handleSaveFile}
+          onQuickOpen={() => setQuickOpenVisible(true)}
+          onGlobalSearch={() => setGlobalSearchVisible(true)}
+          onEditorView={(v) => {
+            editorViewRef.current = v;
+            onEditorViewReady?.(v);
+          }}
+          focusMode={focusMode}
+          typewriterMode={typewriterMode}
+        />
       </div>
 
       <QuickOpen open={quickOpenVisible} onClose={() => setQuickOpenVisible(false)} />

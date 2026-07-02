@@ -1,6 +1,8 @@
-import { readTextFile as tauriReadTextFile } from "@tauri-apps/plugin-fs";
+import { open } from "@tauri-apps/plugin-dialog";
+import { ChevronUp, FileText, Folder, FolderOpen } from "lucide-react";
 import { useEffect, useState } from "react";
-import { type FileEntry, listDirectory, revealInFinder } from "../../lib/ipc";
+import { type FileEntry, listDirectory, readMarkdownFile, revealInFinder } from "../../lib/ipc";
+import { basename, dirname } from "../../lib/path";
 import { useAppStore } from "../../stores/app-store";
 
 export function Sidebar() {
@@ -10,6 +12,7 @@ export function Sidebar() {
   const setFolderPath = useAppStore((s) => s.setFolderPath);
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const folderName = folderPath ? basename(folderPath) : "";
 
   useEffect(() => {
     if (!folderPath) {
@@ -31,72 +34,68 @@ export function Sidebar() {
     }
     if (f.path === currentFilePath) return;
     try {
-      const content = await tauriReadTextFile(f.path);
+      const content = await readMarkdownFile(f.path);
       openFile(f.path, content);
-    } catch {
-      // skip unreadable files
+    } catch (err) {
+      console.error("Failed to open sidebar file:", f.path, err);
     }
   };
 
   const goUp = () => {
     if (!folderPath) return;
-    const parent = folderPath.split("/").slice(0, -1).join("/") || "/";
+    const parent = dirname(folderPath) || "/";
     setFolderPath(parent);
   };
 
+  const handleOpenFolder = async () => {
+    try {
+      const selected = await open({ directory: true, multiple: false });
+      if (selected) setFolderPath(selected);
+    } catch {
+      // ignore cancelled dialogs
+    }
+  };
+
   return (
-    <div
-      className="h-full overflow-y-auto border-r select-none flex flex-col"
-      style={{ background: "var(--surface)", borderColor: "var(--border)" }}
-    >
-      <div
-        className="flex items-center justify-between px-4 py-3 shrink-0 sticky top-0 z-10"
-        style={{ background: "var(--surface)" }}
-      >
-        <span
-          className="text-xs font-semibold uppercase tracking-wider"
-          style={{ color: "var(--text-secondary)" }}
-        >
+    <div className="side-panel h-full overflow-y-auto border-r select-none flex flex-col">
+      <div className="panel-header shrink-0 sticky top-0 z-10">
+        <span>
           Files
         </span>
-        <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-          {files.length}
-        </span>
+        <button type="button" className="icon-button" onClick={handleOpenFolder} title="Open folder">
+          <FolderOpen size={15} />
+        </button>
       </div>
 
       {!folderPath ? (
-        <div className="px-3 py-8 text-center">
-          <p style={{ color: "var(--text-secondary)" }} className="text-sm">
-            Open a folder to begin
-          </p>
+        <div className="panel-empty">
+          <FolderOpen size={28} />
+          <p>No folder open</p>
+          <button type="button" onClick={handleOpenFolder} className="secondary-button">
+            Open Folder
+          </button>
         </div>
       ) : (
         <>
-          <div className="px-3 pb-1">
+          <div className="folder-strip">
             <button
               type="button"
               onClick={goUp}
-              className="text-xs px-2 py-0.5 rounded hover:opacity-80 transition-opacity inline-flex items-center gap-1"
-              style={{ color: "var(--text-secondary)" }}
+              className="folder-up"
+              title={folderPath}
             >
-              ← {folderPath.split("/").pop() || "/"}
+              <ChevronUp size={14} />
+              <span>{folderName}</span>
             </button>
+            <span>{files.length}</span>
           </div>
 
           {loading ? (
-            <div className="px-3 py-4 text-center">
-              <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                Loading...
-              </span>
-            </div>
+            <div className="panel-empty compact">Loading...</div>
           ) : files.length === 0 ? (
-            <div className="px-3 py-4 text-center">
-              <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                Empty folder
-              </span>
-            </div>
+            <div className="panel-empty compact">Empty folder</div>
           ) : (
-            <div className="flex-1 overflow-y-auto px-1 pb-2">
+            <div className="flex-1 overflow-y-auto px-2 pb-2">
               {files.map((f) => (
                 <button
                   type="button"
@@ -134,16 +133,11 @@ export function Sidebar() {
                       0,
                     );
                   }}
-                  className="w-full text-left px-3 py-1 rounded text-sm truncate transition-colors hover:opacity-80"
-                  style={{
-                    color: f.path === currentFilePath ? "var(--accent)" : "var(--text-secondary)",
-                    background: f.path === currentFilePath ? "var(--accent-bg)" : "transparent",
-                    opacity: f.is_dir ? 0.7 : 1,
-                  }}
+                  className={`file-row ${f.path === currentFilePath ? "is-active" : ""}`}
                   title={f.path}
                 >
-                  <span className="mr-2 text-xs">{f.is_dir ? "📁" : "📄"}</span>
-                  {f.name}
+                  {f.is_dir ? <Folder size={15} /> : <FileText size={15} />}
+                  <span>{f.name}</span>
                 </button>
               ))}
             </div>
