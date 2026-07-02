@@ -43,6 +43,27 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "fileAssociations": [
+      {
+        "ext": ["md", "markdown", "mdown", "mkd", "mkdn"],
+        "name": "Markdown Document",
+        "role": "Editor",
+        "mimeType": "text/markdown",
+        "rank": "Default",
+        "contentTypes": ["net.daringfireball.markdown"]
+      },
+      {
+        "ext": ["mdx"],
+        "name": "MDX Document",
+        "role": "Editor",
+        "mimeType": "text/markdown",
+        "rank": "Default",
+        "exportedType": {
+          "identifier": "app.hebe.mdx",
+          "conformsTo": ["public.text", "public.data"]
+        }
+      }
+    ],
     "macOS": {
       "minimumSystemVersion": "13.0"
     }
