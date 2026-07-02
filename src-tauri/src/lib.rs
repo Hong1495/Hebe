@@ -29,9 +29,6 @@ pub fn run() {
             let open_file = MenuItemBuilder::with_id("open-file", "Open File")
                 .accelerator("CmdOrCtrl+O")
                 .build(handle)?;
-            let open_folder = MenuItemBuilder::with_id("open-folder", "Open Folder")
-                .accelerator("CmdOrCtrl+Shift+O")
-                .build(handle)?;
             let new_document = MenuItemBuilder::with_id("new-document", "New Document")
                 .accelerator("CmdOrCtrl+N")
                 .build(handle)?;
@@ -42,16 +39,6 @@ pub fn run() {
             let export_docx = MenuItemBuilder::with_id("export-docx", "DOCX").build(handle)?;
             let export_html = MenuItemBuilder::with_id("export-html", "HTML").build(handle)?;
             let export_epub = MenuItemBuilder::with_id("export-epub", "EPUB").build(handle)?;
-            let quick_open = MenuItemBuilder::with_id("quick-open", "Quick Open")
-                .accelerator("CmdOrCtrl+P")
-                .build(handle)?;
-            let global_search = MenuItemBuilder::with_id("global-search", "Search in Folder")
-                .accelerator("CmdOrCtrl+Shift+F")
-                .build(handle)?;
-            let toggle_files = CheckMenuItemBuilder::with_id("toggle-sidebar", "Files Sidebar")
-                .accelerator("CmdOrCtrl+B")
-                .checked(false)
-                .build(handle)?;
             let toggle_outline = CheckMenuItemBuilder::with_id("toggle-outline", "Outline")
                 .accelerator("CmdOrCtrl+Shift+B")
                 .checked(false)
@@ -98,7 +85,6 @@ pub fn run() {
             let file_menu = SubmenuBuilder::new(handle, "File")
                 .item(&new_document)
                 .item(&open_file)
-                .item(&open_folder)
                 .item(&save_file)
                 .item(&export_menu)
                 .build()?;
@@ -112,7 +98,6 @@ pub fn run() {
                 .item(&PredefinedMenuItem::select_all(handle, None)?)
                 .build()?;
             let view_menu = SubmenuBuilder::new(handle, "View")
-                .item(&toggle_files)
                 .item(&toggle_outline)
                 .separator()
                 .item(&focus_mode)
@@ -123,10 +108,6 @@ pub fn run() {
                 .item(&zoom_reset)
                 .separator()
                 .item(&PredefinedMenuItem::fullscreen(handle, None)?)
-                .build()?;
-            let navigate_menu = SubmenuBuilder::new(handle, "Navigate")
-                .item(&quick_open)
-                .item(&global_search)
                 .build()?;
             let window_menu = SubmenuBuilder::new(handle, "Window")
                 .item(&PredefinedMenuItem::minimize(handle, None)?)
@@ -141,7 +122,6 @@ pub fn run() {
                 .item(&file_menu)
                 .item(&edit_menu)
                 .item(&view_menu)
-                .item(&navigate_menu)
                 .item(&window_menu)
                 .item(&help_menu)
                 .build()
@@ -182,12 +162,8 @@ pub fn run() {
             commands::write_markdown_file,
             commands::get_file_mtime,
             commands::get_heading_outline,
-            commands::list_directory,
-            commands::list_markdown_files,
             commands::export_document,
-            commands::search_fulltext,
             commands::paste_image,
-            commands::reveal_in_finder,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

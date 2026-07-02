@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { EditorArea } from "./components/layout/EditorArea";
 import { OutlinePanel } from "./components/layout/OutlinePanel";
 import { SettingsDialog } from "./components/layout/SettingsPanel";
-import { Sidebar } from "./components/layout/Sidebar";
 import { StatusBar } from "./components/layout/StatusBar";
 import { TabBar } from "./components/layout/TabBar";
 import { isTauriRuntime, readMarkdownFile, takePendingOpenFiles } from "./lib/ipc";
@@ -21,12 +20,9 @@ const WINDOW_BACKGROUND: Record<"light" | "dark", string> = {
 };
 
 function App() {
-  const sidebarVisible = useAppStore((s) => s.sidebarVisible);
   const outlineVisible = useAppStore((s) => s.outlineVisible);
   const settingsVisible = useAppStore((s) => s.settingsVisible);
-  const sidebarWidth = useAppStore((s) => s.sidebarWidth);
   const outlineWidth = useAppStore((s) => s.outlineWidth);
-  const setSidebarWidth = useAppStore((s) => s.setSidebarWidth);
   const setOutlineWidth = useAppStore((s) => s.setOutlineWidth);
   const openFile = useAppStore((s) => s.openFile);
   const addRecentFile = useAppStore((s) => s.addRecentFile);
@@ -166,19 +162,17 @@ function App() {
 
   const gridCols = useMemo(() => {
     const cols = [];
-    if (sidebarVisible) cols.push(`${sidebarWidth}px`, "4px");
     cols.push("1fr");
     if (outlineVisible) cols.push("4px", `${outlineWidth}px`);
     return cols.join(" ");
-  }, [sidebarVisible, outlineVisible, sidebarWidth, outlineWidth]);
+  }, [outlineVisible, outlineWidth]);
 
-  const beginResize = (side: "left" | "right", startX: number) => {
-    const initialWidth = side === "left" ? sidebarWidth : outlineWidth;
+  const beginOutlineResize = (startX: number) => {
+    const initialWidth = outlineWidth;
 
     const handleMove = (event: MouseEvent) => {
       const delta = event.clientX - startX;
-      if (side === "left") setSidebarWidth(initialWidth + delta);
-      else setOutlineWidth(initialWidth - delta);
+      setOutlineWidth(initialWidth - delta);
     };
 
     const handleUp = () => {
@@ -208,17 +202,6 @@ function App() {
     <div className="app-shell" style={{ background: "var(--bg)", color: "var(--text)" }}>
       <TabBar />
       <div className="app-body" style={{ gridTemplateColumns: gridCols }}>
-        {sidebarVisible && (
-          <div className="app-rail">
-            <Sidebar />
-          </div>
-        )}
-        {sidebarVisible && (
-          <div
-            className="panel-resizer panel-resizer-left"
-            onMouseDown={(event) => beginResize("left", event.clientX)}
-          />
-        )}
         <div className="app-main">
           <EditorArea
             onEditorViewReady={(v) => {
@@ -229,7 +212,7 @@ function App() {
         {outlineVisible && (
           <div
             className="panel-resizer panel-resizer-right"
-            onMouseDown={(event) => beginResize("right", event.clientX)}
+            onMouseDown={(event) => beginOutlineResize(event.clientX)}
           />
         )}
         {outlineVisible && (

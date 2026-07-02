@@ -12,12 +12,6 @@ export interface Heading {
   line: number;
 }
 
-export interface FileEntry {
-  name: string;
-  path: string;
-  is_dir: boolean;
-}
-
 export async function readMarkdownFile(path: string): Promise<string> {
   if (!isTauriRuntime()) throw new Error("File I/O requires Tauri runtime");
   return invoke<string>("read_markdown_file", { path });
@@ -43,16 +37,6 @@ export async function getHeadingOutline(content: string): Promise<Heading[]> {
   return invoke<Heading[]>("get_heading_outline", { content });
 }
 
-export async function listDirectory(path: string): Promise<FileEntry[]> {
-  if (!isTauriRuntime()) return [];
-  return invoke<FileEntry[]>("list_directory", { path });
-}
-
-export async function listMarkdownFiles(path: string): Promise<FileEntry[]> {
-  if (!isTauriRuntime()) return [];
-  return invoke<FileEntry[]>("list_markdown_files", { path });
-}
-
 export async function exportDocument(
   content: string,
   inputPath: string,
@@ -74,22 +58,7 @@ function fallbackParseHeadings(content: string): Heading[] {
   return headings;
 }
 
-export interface SearchResult {
-  path: string;
-  snippet: string;
-}
-
-export async function searchFulltext(folderPath: string, query: string): Promise<SearchResult[]> {
-  if (!isTauriRuntime()) return [];
-  return invoke<SearchResult[]>("search_fulltext", { folderPath, queryStr: query });
-}
-
 export async function pasteImage(imageData: number[], mdPath: string): Promise<string> {
   if (!isTauriRuntime()) throw new Error("Paste requires Tauri runtime");
   return invoke<string>("paste_image", { imageData, mdPath });
-}
-
-export async function revealInFinder(path: string): Promise<void> {
-  if (!isTauriRuntime()) return;
-  return invoke<void>("reveal_in_finder", { path });
 }

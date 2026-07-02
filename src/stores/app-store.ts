@@ -8,10 +8,8 @@ interface TabState {
 }
 
 interface AppState {
-  sidebarVisible: boolean;
   settingsVisible: boolean;
   outlineVisible: boolean;
-  sidebarWidth: number;
   outlineWidth: number;
   focusMode: boolean;
   typewriterMode: boolean;
@@ -26,14 +24,10 @@ interface AppState {
   currentFilePath: () => string | null;
   currentContent: () => string;
 
-  // File management
-  folderPath: string | null;
   recentFiles: string[];
 
-  toggleSidebar: () => void;
   toggleSettings: () => void;
   toggleOutline: () => void;
-  setSidebarWidth: (width: number) => void;
   setOutlineWidth: (width: number) => void;
   toggleFocusMode: () => void;
   toggleTypewriterMode: () => void;
@@ -54,7 +48,6 @@ interface AppState {
   setActiveTabPath: (path: string) => void;
   moveTab: (from: number, to: number) => void;
 
-  setFolderPath: (path: string | null) => void;
   addRecentFile: (path: string) => void;
   setRecentFiles: (paths: string[]) => void;
 }
@@ -89,10 +82,8 @@ const readStoredZoom = (): number => {
 };
 
 export const useAppStore = create<AppState>((set, get) => ({
-  sidebarVisible: false,
   settingsVisible: false,
   outlineVisible: false,
-  sidebarWidth: 256,
   outlineWidth: 232,
   focusMode: false,
   typewriterMode: false,
@@ -100,7 +91,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   zoom: readStoredZoom(),
   tabs: [{ path: null, content: "", dirty: false }],
   activeTabIndex: 0,
-  folderPath: null,
   recentFiles: readStoredRecentFiles(),
 
   currentFilePath: () => {
@@ -112,10 +102,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     return tabs[activeTabIndex]?.content ?? "";
   },
 
-  toggleSidebar: () => set((s) => ({ sidebarVisible: !s.sidebarVisible })),
   toggleSettings: () => set((s) => ({ settingsVisible: !s.settingsVisible })),
   toggleOutline: () => set((s) => ({ outlineVisible: !s.outlineVisible })),
-  setSidebarWidth: (width) => set({ sidebarWidth: Math.min(420, Math.max(180, width)) }),
   setOutlineWidth: (width) => set({ outlineWidth: Math.min(360, Math.max(180, width)) }),
   toggleFocusMode: () => set((s) => ({ focusMode: !s.focusMode })),
   toggleTypewriterMode: () => set((s) => ({ typewriterMode: !s.typewriterMode })),
@@ -225,7 +213,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { tabs: newTabs, activeTabIndex: newIndex };
     }),
 
-  setFolderPath: (path) => set({ folderPath: path }),
   addRecentFile: (path) =>
     set((s) => {
       const filtered = s.recentFiles.filter((f) => f !== path);

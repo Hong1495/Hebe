@@ -42,8 +42,6 @@ interface HybridEditorProps {
   onOpenFile?: () => void;
   onNewDocument?: () => void;
   onSaveFile?: () => void;
-  onQuickOpen?: () => void;
-  onGlobalSearch?: () => void;
   focusMode?: boolean;
   typewriterMode?: boolean;
   onEditorView?: (view: EditorView) => void;
@@ -56,8 +54,6 @@ export function HybridEditor({
   onOpenFile,
   onNewDocument,
   onSaveFile,
-  onQuickOpen,
-  onGlobalSearch,
   focusMode = false,
   typewriterMode = false,
   onEditorView,
@@ -98,20 +94,6 @@ export function HybridEditor({
           return true;
         },
         preventDefault: true,
-      },
-      {
-        key: "Mod-p",
-        run: () => {
-          onQuickOpen?.();
-          return true;
-        },
-      },
-      {
-        key: "Mod-Shift-f",
-        run: () => {
-          onGlobalSearch?.();
-          return true;
-        },
       },
     ]);
 

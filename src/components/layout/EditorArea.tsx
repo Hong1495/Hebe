@@ -1,7 +1,7 @@
 import { EditorView } from "@codemirror/view";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import {
   exportDocument,
   getFileMtime,
@@ -11,8 +11,6 @@ import {
 } from "../../lib/ipc";
 import { useAppStore } from "../../stores/app-store";
 import { HybridEditor } from "../editor/HybridEditor";
-import { GlobalSearch } from "./GlobalSearch";
-import { QuickOpen } from "./QuickOpen";
 
 const AUTO_SAVE_DELAY = 3000;
 
@@ -28,9 +26,7 @@ export function EditorArea({ onEditorViewReady }: Props) {
   const currentContent = activeTab?.content ?? "";
   const activeTabDirty = activeTab?.dirty ?? false;
 
-  const setFolderPath = useAppStore((s) => s.setFolderPath);
   const addRecentFile = useAppStore((s) => s.addRecentFile);
-  const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const toggleOutline = useAppStore((s) => s.toggleOutline);
   const toggleSettings = useAppStore((s) => s.toggleSettings);
   const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
@@ -47,8 +43,6 @@ export function EditorArea({ onEditorViewReady }: Props) {
   const focusMode = useAppStore((s) => s.focusMode);
   const typewriterMode = useAppStore((s) => s.typewriterMode);
 
-  const [quickOpenVisible, setQuickOpenVisible] = useState(false);
-  const [globalSearchVisible, setGlobalSearchVisible] = useState(false);
   const editorViewRef = useRef<EditorView | null>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const focusEditorSoon = useCallback(() => {
@@ -83,16 +77,6 @@ export function EditorArea({ onEditorViewReady }: Props) {
       console.error("Failed to open file:", err);
     }
   }, [openFile, addRecentFile, focusEditorSoon]);
-
-  const handleOpenFolder = useCallback(async () => {
-    if (!isTauriRuntime()) return;
-    try {
-      const selected = await open({ directory: true, multiple: false });
-      if (selected) setFolderPath(selected);
-    } catch (err) {
-      console.error("Failed to open folder:", err);
-    }
-  }, [setFolderPath]);
 
   const handleSaveFile = useCallback(async () => {
     if (!isTauriRuntime()) return;
@@ -220,9 +204,6 @@ export function EditorArea({ onEditorViewReady }: Props) {
             case "open-file":
               await handleOpenFile();
               break;
-            case "open-folder":
-              await handleOpenFolder();
-              break;
             case "new-document":
               openNewTab("");
               focusEditorSoon();
@@ -241,15 +222,6 @@ export function EditorArea({ onEditorViewReady }: Props) {
               break;
             case "export-epub":
               await handleExport("epub");
-              break;
-            case "quick-open":
-              setQuickOpenVisible(true);
-              break;
-            case "global-search":
-              setGlobalSearchVisible(true);
-              break;
-            case "toggle-sidebar":
-              toggleSidebar();
               break;
             case "toggle-outline":
               toggleOutline();
@@ -290,12 +262,10 @@ export function EditorArea({ onEditorViewReady }: Props) {
     };
   }, [
     handleOpenFile,
-    handleOpenFolder,
     handleSaveFile,
     handleExport,
     openNewTab,
     focusEditorSoon,
-    toggleSidebar,
     toggleOutline,
     toggleSettings,
     toggleFocusMode,
@@ -316,8 +286,6 @@ export function EditorArea({ onEditorViewReady }: Props) {
           onNewDocument={() => openNewTab("")}
           onOpenFile={handleOpenFile}
           onSaveFile={handleSaveFile}
-          onQuickOpen={() => setQuickOpenVisible(true)}
-          onGlobalSearch={() => setGlobalSearchVisible(true)}
           onEditorView={(v) => {
             editorViewRef.current = v;
             onEditorViewReady?.(v);
@@ -326,9 +294,6 @@ export function EditorArea({ onEditorViewReady }: Props) {
           typewriterMode={typewriterMode}
         />
       </div>
-
-      <QuickOpen open={quickOpenVisible} onClose={() => setQuickOpenVisible(false)} />
-      <GlobalSearch open={globalSearchVisible} onClose={() => setGlobalSearchVisible(false)} />
     </div>
   );
 }
