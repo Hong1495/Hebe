@@ -6,7 +6,7 @@ import { isTauriRuntime } from "../../../lib/ipc";
 import { dirname } from "../../../lib/path";
 import {
   editorFocusedField,
-  setEditorFocused,
+  previewDecorationsNeedRefresh,
   previewRevealRangeField,
   setPreviewRevealRange,
 } from "./hybrid-preview";
@@ -90,17 +90,31 @@ class MermaidWidget extends WidgetType {
     const container = document.createElement("div");
     container.className = "cm-mermaid-container";
     makeEditableWidget(container, view, this.revealFrom, this.revealTo);
-    container.innerHTML = `<pre class="cm-mermaid-code">${escapeHtml(this.code)}</pre><div id="${this.id}"></div>`;
 
-    import("mermaid").then((mermaid) => {
+    const fallback = document.createElement("pre");
+    fallback.className = "cm-mermaid-code";
+    fallback.textContent = this.code;
+
+    const diagram = document.createElement("div");
+    diagram.className = "cm-mermaid-diagram";
+    container.append(fallback, diagram);
+
+    void (async () => {
       try {
-        mermaid.default.run({ nodes: [document.getElementById(this.id)!] });
-        const pre = container.querySelector(".cm-mermaid-code") as HTMLElement | null;
-        if (pre) pre.style.display = "none";
-      } catch {
-        // keep pre visible as fallback
+        const { default: mermaid } = await import("mermaid");
+        mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
+        const result = await mermaid.render(`${this.id}-svg`, this.code);
+        if (!container.isConnected) return;
+        diagram.innerHTML = result.svg;
+        result.bindFunctions?.(diagram);
+        fallback.hidden = true;
+      } catch (error) {
+        const message = formatWidgetError(error);
+        fallback.dataset.error = message;
+        fallback.title = message;
+        diagram.replaceChildren();
       }
-    });
+    })();
 
     return container;
   }
@@ -438,12 +452,14 @@ function createFallbackText(message: string): HTMLElement {
   return span;
 }
 
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+function formatWidgetError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error) ?? String(error);
+  } catch {
+    return String(error);
+  }
 }
 
 interface BlockRange {
@@ -852,10 +868,7 @@ export const blockWidgetPlugin = (mdPath: string | null) =>
       return blockDecorations(state, mdPath);
     },
     update(decorations, transaction) {
-      const revealChanged = transaction.effects.some(
-        (effect) => effect.is(setPreviewRevealRange) || effect.is(setEditorFocused),
-      );
-      if (transaction.docChanged || transaction.selection || revealChanged) {
+      if (previewDecorationsNeedRefresh(transaction)) {
         return blockDecorations(transaction.state, mdPath);
       }
       return decorations.map(transaction.changes);

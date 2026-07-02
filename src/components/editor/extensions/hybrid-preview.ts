@@ -1,4 +1,4 @@
-import { StateEffect, StateField, type EditorState } from "@codemirror/state";
+import { StateEffect, StateField, type EditorState, type Transaction } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
 
 export interface PreviewRevealRange {
@@ -49,6 +49,18 @@ export const previewRevealRangeField = StateField.define<PreviewRevealRange | nu
     return next;
   },
 });
+
+export function previewDecorationsNeedRefresh(transaction: Transaction): boolean {
+  const revealChanged = transaction.effects.some(
+    (effect) => effect.is(setPreviewRevealRange) || effect.is(setEditorFocused),
+  );
+  if (transaction.docChanged || revealChanged) return true;
+  if (!transaction.selection) return false;
+  return (
+    selectionRevealLineSignature(transaction.startState) !==
+    selectionRevealLineSignature(transaction.state)
+  );
+}
 
 const MAX_INLINE_SCAN_LENGTH = 6000;
 
@@ -385,6 +397,18 @@ function selectionTouchesRange(
   return state.selection.ranges.some((range) => range.from <= to && range.to >= from);
 }
 
+function selectionRevealLineSignature(state: EditorState): string {
+  const editorFocused = state.field(editorFocusedField, false) ?? false;
+  if (!editorFocused) return "";
+  return state.selection.ranges
+    .map((range) => {
+      const fromLine = state.doc.lineAt(range.from).number;
+      const toLine = state.doc.lineAt(Math.min(range.to, state.doc.length)).number;
+      return `${fromLine}:${toLine}`;
+    })
+    .join("|");
+}
+
 function rangeIsCurrentlyRevealed(state: EditorState, from: number, to: number): boolean {
   const editorFocused = state.field(editorFocusedField, false) ?? false;
   const revealRange = state.field(previewRevealRangeField, false) ?? null;
@@ -412,11 +436,13 @@ export const pasteImagePlugin = (mdPath: string | null) =>
             try {
               const { pasteImage } = await import("../../../lib/ipc");
               const relPath = await pasteImage(data, mdPath);
+              const imageMarkdown = `![](${relPath})`;
+              const paste = imagePasteTransaction(view.state, imageMarkdown);
               view.dispatch({
-                changes: {
-                  from: view.state.selection.main.from,
-                  insert: `![](${relPath})`,
-                },
+                changes: paste.changes,
+                selection: { anchor: paste.selectionAnchor },
+                effects: setPreviewRevealRange.of(null),
+                scrollIntoView: true,
               });
             } catch {
               // clipboard paste not available
@@ -430,15 +456,33 @@ export const pasteImagePlugin = (mdPath: string | null) =>
     },
   });
 
+function imagePasteTransaction(
+  state: EditorState,
+  imageMarkdown: string,
+): { changes: { from: number; to: number; insert: string }; selectionAnchor: number } {
+  const selection = state.selection.main;
+  const startLine = state.doc.lineAt(selection.from);
+  const before = state.doc.sliceString(startLine.from, selection.from);
+  const prefix = before.trim().length > 0 ? "\n" : "";
+  const suffix = "\n";
+  const insert = `${prefix}${imageMarkdown}${suffix}`;
+
+  return {
+    changes: {
+      from: selection.from,
+      to: selection.to,
+      insert,
+    },
+    selectionAnchor: selection.from + insert.length,
+  };
+}
+
 export const inlinePreviewPlugin = StateField.define<DecorationSet>({
   create(state) {
     return hideMarkDeco(state);
   },
   update(decorations, transaction) {
-    const revealChanged = transaction.effects.some(
-      (effect) => effect.is(setPreviewRevealRange) || effect.is(setEditorFocused),
-    );
-    if (transaction.docChanged || transaction.selection || revealChanged) {
+    if (previewDecorationsNeedRefresh(transaction)) {
       return hideMarkDeco(transaction.state);
     }
     return decorations.map(transaction.changes);

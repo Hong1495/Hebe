@@ -2,8 +2,20 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
 
+let appBootstrapped = false;
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error, null, 2) ?? String(error);
+  } catch {
+    return String(error);
+  }
+}
+
 function showStartupError(error: unknown) {
-  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  const message = formatUnknownError(error);
   const stack = error instanceof Error && error.stack ? `\n\n${error.stack}` : "";
   const root = document.getElementById("root");
   if (!root) return;
@@ -25,12 +37,20 @@ function showStartupError(error: unknown) {
   root.appendChild(pre);
 }
 
+function handleGlobalError(error: unknown) {
+  if (!appBootstrapped) {
+    showStartupError(error);
+    return;
+  }
+  console.error("Unhandled runtime error:", error);
+}
+
 window.addEventListener("error", (event) => {
-  showStartupError(event.error ?? event.message);
+  handleGlobalError(event.error ?? event.message);
 });
 
 window.addEventListener("unhandledrejection", (event) => {
-  showStartupError(event.reason);
+  handleGlobalError(event.reason);
 });
 
 if ("__TAURI_INTERNALS__" in window) {
@@ -53,5 +73,6 @@ import("./App")
         <App />
       </StrictMode>,
     );
+    appBootstrapped = true;
   })
   .catch(showStartupError);

@@ -997,12 +997,24 @@ input:focus-visible {
   text-align: center;
 }
 
+.cm-mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
 .cm-mermaid-code {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--md-muted);
   white-space: pre-wrap;
   text-align: left;
+}
+
+.cm-mermaid-code[data-error]::before {
+  content: attr(data-error) "\A\A";
+  display: block;
+  color: #b91c1c;
+  white-space: pre-wrap;
 }
 
 .cm-image-container img {

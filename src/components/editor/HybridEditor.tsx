@@ -1,5 +1,6 @@
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
 import { EditorState, type Extension } from "@codemirror/state";
@@ -115,6 +116,7 @@ export function HybridEditor({
     ]);
 
     const extensions: Extension[] = [
+      markdown({ base: markdownLanguage }),
       history(),
       closeBrackets(),
       highlightSelectionMatches(),
