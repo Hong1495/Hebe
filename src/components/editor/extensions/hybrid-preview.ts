@@ -3,6 +3,8 @@ import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemir
 import {
   type InlineSpanKind,
   type MarkdownLineReplacement,
+  markdownVisibleLineLength,
+  markdownVisibleLineOffsetToSourceOffset,
   pasteMarkdownImage,
   scanMarkdownLineDecorations,
 } from "../markdown-kernel";
@@ -316,6 +318,7 @@ export const clickRevealPlugin = (() => {
   return EditorView.domEventHandlers({
     mousedown(event, view) {
       if (
+        view.composing ||
         event.button !== 0 ||
         event.detail > 1 ||
         event.shiftKey ||
@@ -482,7 +485,7 @@ function visualPositionInLine(
     }
   }
 
-  return approximatePositionInLine(clientX, element, line.from, line.to);
+  return approximatePositionInLine(clientX, view, element, line);
 }
 
 function domCaretPositionFromPoint(
@@ -548,15 +551,18 @@ function visibleTextBounds(element: HTMLElement): { left: number; right: number 
 
 function approximatePositionInLine(
   clientX: number,
+  view: EditorView,
   element: HTMLElement,
-  from: number,
-  to: number,
+  line: { from: number; to: number },
 ): number {
   const bounds = visibleTextBounds(element);
   const rect = bounds ?? element.getBoundingClientRect();
   const width = Math.max(0, rect.right - rect.left);
   const ratio = width > 0 ? clamp((clientX - rect.left) / width, 0, 1) : 0;
-  return from + Math.round(ratio * Math.max(0, to - from));
+  const lineText = view.state.doc.sliceString(line.from, line.to);
+  const visibleLength = markdownVisibleLineLength(lineText);
+  const visibleOffset = Math.round(ratio * visibleLength);
+  return line.from + markdownVisibleLineOffsetToSourceOffset(lineText, visibleOffset);
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -573,7 +579,7 @@ export const hybridBaseTheme = EditorView.baseTheme({
     display: "none !important",
   },
   // When a line is focused (cursor inside), show raw markdown marks
-  ".cm-line.cm-activeLine .cm-hybrid-hidden": {
+  "&.cm-focused .cm-line.cm-activeLine .cm-hybrid-hidden": {
     display: "inline !important",
   },
   ".cm-line": {

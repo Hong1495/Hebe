@@ -10,6 +10,8 @@ import {
   markdownBlockProjection,
   markdownBlockPositionFromHit,
   markdownSourceRangePositionFromRatio,
+  markdownVisibleLineLength,
+  markdownVisibleLineOffsetToSourceOffset,
   navigateMarkdownTableCell,
   type MarkdownTextChange,
   pasteMarkdownTableCells,
@@ -487,6 +489,27 @@ describe("markdown kernel", () => {
     });
     expect(lines[5].classes).toEqual(["md-code-block-line"]);
     expect(lines[5].inlineSpans).toEqual([]);
+  });
+
+  it("maps visible inline offsets back to source offsets with hidden markdown markers", () => {
+    expect(markdownVisibleLineLength("**bold**")).toBe(4);
+    expect(markdownVisibleLineOffsetToSourceOffset("**bold**", 0)).toBe(2);
+    expect(markdownVisibleLineOffsetToSourceOffset("**bold**", 4)).toBe(6);
+
+    expect(markdownVisibleLineLength("# Title")).toBe(5);
+    expect(markdownVisibleLineOffsetToSourceOffset("# Title", 0)).toBe(2);
+    expect(markdownVisibleLineOffsetToSourceOffset("# Title", 5)).toBe(7);
+
+    expect(markdownVisibleLineLength("[link](url)")).toBe(4);
+    expect(markdownVisibleLineOffsetToSourceOffset("[link](url)", 0)).toBe(1);
+    expect(markdownVisibleLineOffsetToSourceOffset("[link](url)", 4)).toBe(5);
+  });
+
+  it("keeps list marker projection as a visible marker mapped to source marker text", () => {
+    expect(markdownVisibleLineLength("- [x] Done")).toBe("☑Done".length);
+    expect(markdownVisibleLineOffsetToSourceOffset("- [x] Done", 0)).toBe(0);
+    expect(markdownVisibleLineOffsetToSourceOffset("- [x] Done", 1)).toBe("- [x] ".length);
+    expect(markdownVisibleLineOffsetToSourceOffset("- [x] Done", 5)).toBe("- [x] Done".length);
   });
 
   it("finds inline math outside inline code", () => {

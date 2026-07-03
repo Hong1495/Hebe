@@ -828,6 +828,37 @@ export function scanMarkdownLineDecorations(
   return decorations;
 }
 
+export function markdownVisibleLineOffsetToSourceOffset(
+  lineText: string,
+  visibleOffset: number,
+): number {
+  const segments = markdownVisibleLineSegments(lineText);
+  const visibleLength = segments.reduce((sum, segment) => sum + segment.visibleLength, 0);
+  let remaining = clampInt(visibleOffset, 0, visibleLength);
+
+  for (const segment of segments) {
+    if (remaining > segment.visibleLength) {
+      remaining -= segment.visibleLength;
+      continue;
+    }
+
+    if (segment.visibleLength <= 0) return segment.sourceFrom;
+    if (segment.sourceTo - segment.sourceFrom === segment.visibleLength) {
+      return clampInt(segment.sourceFrom + remaining, segment.sourceFrom, segment.sourceTo);
+    }
+    return remaining <= 0 ? segment.sourceFrom : segment.sourceTo;
+  }
+
+  return lineText.length;
+}
+
+export function markdownVisibleLineLength(lineText: string): number {
+  return markdownVisibleLineSegments(lineText).reduce(
+    (sum, segment) => sum + segment.visibleLength,
+    0,
+  );
+}
+
 function splitSourceLines(source: string): SourceLine[] {
   if (source.length === 0) return [{ number: 1, from: 0, to: 0, text: "" }];
 
@@ -1442,6 +1473,39 @@ function scanPlainSourceLine(line: SourceLine, revealed: boolean): MarkdownLineD
     replacements,
     inlineSpans,
   };
+}
+
+function markdownVisibleLineSegments(
+  lineText: string,
+): Array<{ sourceFrom: number; sourceTo: number; visibleLength: number }> {
+  const line = scanMarkdownLineDecorations(lineText)[0];
+  if (!line) return [{ sourceFrom: 0, sourceTo: lineText.length, visibleLength: lineText.length }];
+
+  const segments: Array<{ sourceFrom: number; sourceTo: number; visibleLength: number }> = [];
+  const replacements = [...line.replacements].sort((a, b) => a.from - b.from || a.to - b.to);
+  let cursor = 0;
+
+  for (const replacement of replacements) {
+    const from = clampInt(replacement.from, 0, lineText.length);
+    const to = clampInt(replacement.to, from, lineText.length);
+    if (from > cursor) {
+      segments.push({ sourceFrom: cursor, sourceTo: from, visibleLength: from - cursor });
+    }
+    if (replacement.kind === "listMarker") {
+      segments.push({ sourceFrom: from, sourceTo: to, visibleLength: 1 });
+    }
+    cursor = Math.max(cursor, to);
+  }
+
+  if (cursor < lineText.length) {
+    segments.push({
+      sourceFrom: cursor,
+      sourceTo: lineText.length,
+      visibleLength: lineText.length - cursor,
+    });
+  }
+
+  return segments.length ? segments : [{ sourceFrom: 0, sourceTo: 0, visibleLength: 0 }];
 }
 
 function offsetInlineSpan(span: InlineSpan, offset: number): MarkdownInlineDecoration {
