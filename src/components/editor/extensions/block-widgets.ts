@@ -304,6 +304,7 @@ class TableWidget extends WidgetType {
 
     const thead = document.createElement("thead");
     const headerRow = document.createElement("tr");
+    headerRow.dataset.sourceLineOffset = "0";
     this.table.headers.forEach((cell, index) => {
       const th = document.createElement("th");
       th.textContent = cell;
@@ -314,8 +315,9 @@ class TableWidget extends WidgetType {
     table.appendChild(thead);
 
     const tbody = document.createElement("tbody");
-    this.table.rows.forEach((row) => {
+    this.table.rows.forEach((row, rowIndex) => {
       const tr = document.createElement("tr");
+      tr.dataset.sourceLineOffset = String(rowIndex + 2);
       this.table.headers.forEach((_, index) => {
         const td = document.createElement("td");
         td.textContent = row[index] ?? "";
@@ -375,11 +377,8 @@ function blockClickPosition(
   const endLineNo = doc.lineAt(Math.min(to, doc.length)).number;
   const rect = element.getBoundingClientRect();
   const yRatio = rect.height > 0 ? clamp((event.clientY - rect.top) / rect.height, 0, 1) : 0;
-  const lineNo = clampInt(
-    startLineNo + yRatio * Math.max(0, endLineNo - startLineNo),
-    startLineNo,
-    endLineNo,
-  );
+  const lineCount = Math.max(1, endLineNo - startLineNo + 1);
+  const lineNo = startLineNo + Math.min(lineCount - 1, Math.floor(yRatio * lineCount));
   const line = doc.line(lineNo);
   const xRatio = rect.width > 0 ? clamp((event.clientX - rect.left) / rect.width, 0, 1) : 0;
   const offset = Math.round(xRatio * line.length);
@@ -431,12 +430,17 @@ function tableClickPosition(
   const section = row?.parentElement;
   if (!row || !section) return Math.min(from, view.state.doc.length);
 
+  const sourceLineOffset = Number.parseInt(row.dataset.sourceLineOffset ?? "", 10);
   const rowIndex = Array.from(section.children).indexOf(row);
-  const sourceLineOffset = section.tagName.toLowerCase() === "thead" ? 0 : rowIndex + 2;
+  const fallbackLineOffset = section.tagName.toLowerCase() === "thead" ? 0 : rowIndex + 2;
   const doc = view.state.doc;
   const startLineNo = doc.lineAt(Math.min(from, doc.length)).number;
   const endLineNo = doc.lineAt(Math.min(to, doc.length)).number;
-  const lineNo = clampInt(startLineNo + sourceLineOffset, startLineNo, endLineNo);
+  const lineNo = clampInt(
+    startLineNo + (Number.isFinite(sourceLineOffset) ? sourceLineOffset : fallbackLineOffset),
+    startLineNo,
+    endLineNo,
+  );
   const line = doc.line(lineNo);
 
   const spans = tableCellSpans(line.text);
