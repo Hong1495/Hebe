@@ -62,3 +62,8 @@ export async function pasteImage(imageData: number[], mdPath: string): Promise<s
   if (!isTauriRuntime()) throw new Error("Paste requires Tauri runtime");
   return invoke<string>("paste_image", { imageData, mdPath });
 }
+
+export async function hideMainWindow(): Promise<void> {
+  if (!isTauriRuntime()) return;
+  return invoke<void>("hide_main_window");
+}

@@ -9,7 +9,7 @@ import { SettingsDialog } from "./components/layout/SettingsPanel";
 import { StatusBar } from "./components/layout/StatusBar";
 import { TabBar } from "./components/layout/TabBar";
 import { closeTabWithPrompt, prepareWindowClose } from "./lib/document-lifecycle";
-import { isTauriRuntime, readMarkdownFile, takePendingOpenFiles } from "./lib/ipc";
+import { hideMainWindow, isTauriRuntime, readMarkdownFile, takePendingOpenFiles } from "./lib/ipc";
 import { useResolvedTheme } from "./lib/use-resolved-theme";
 import { useAppStore } from "./stores/app-store";
 
@@ -159,7 +159,11 @@ function App() {
           windowCloseInProgressRef.current = true;
           try {
             if (await prepareWindowClose()) {
-              await getCurrentWindow().hide();
+              try {
+                await hideMainWindow();
+              } catch {
+                await getCurrentWindow().hide();
+              }
             }
           } finally {
             windowCloseInProgressRef.current = false;

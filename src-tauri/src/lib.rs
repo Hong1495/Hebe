@@ -8,6 +8,11 @@ fn take_pending_open_files(pending: tauri::State<'_, PendingOpenFiles>) -> Vec<S
     }
 }
 
+#[tauri::command]
+fn hide_main_window(window: tauri::Window) -> Result<(), String> {
+    window.hide().map_err(|error| error.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     use tauri::menu::{
@@ -220,6 +225,7 @@ pub fn run() {
             commands::get_heading_outline,
             commands::export_document,
             commands::paste_image,
+            hide_main_window,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
