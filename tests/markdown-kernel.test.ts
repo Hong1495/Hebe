@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  appendMarkdownTableRow,
   formatMarkdownSelection,
   isMarkdownFormatCommand,
   markdownBlockPositionFromHit,
   markdownSourceRangePositionFromRatio,
+  navigateMarkdownTableCell,
   type MarkdownTextChange,
   pasteMarkdownImage,
   parseImageLine,
@@ -125,6 +127,23 @@ describe("markdown kernel", () => {
     );
   });
 
+  it("normalizes empty table cells when updating through projection", () => {
+    const source = "| A | B |\n| --- | --- |\n|  |  |";
+    const block = parseMarkdownBlocks(source)[0];
+    if (block.kind !== "table") throw new Error("expected table block");
+
+    const change = updateMarkdownTableCell(
+      block,
+      { rowKind: "body", rowIndex: 0, cellIndex: 0 },
+      "alpha",
+    );
+
+    expect(change).not.toBeNull();
+    expect(applyMarkdownEdit(source, { changes: [change as MarkdownTextChange] })).toBe(
+      "| A | B |\n| --- | --- |\n| alpha |  |",
+    );
+  });
+
   it("does not create table cell edits for missing cells", () => {
     const source = "| A | B |\n| --- | --- |\n| x | y |";
     const block = parseMarkdownBlocks(source)[0];
@@ -133,6 +152,57 @@ describe("markdown kernel", () => {
     expect(
       updateMarkdownTableCell(block, { rowKind: "body", rowIndex: 0, cellIndex: 5 }, "z"),
     ).toBeNull();
+  });
+
+  it("navigates table cells in projected editing order", () => {
+    const source = "| A | B |\n| --- | --- |\n| x | y |\n| z | q |";
+    const block = parseMarkdownBlocks(source)[0];
+    if (block.kind !== "table") throw new Error("expected table block");
+
+    expect(
+      navigateMarkdownTableCell(block, { rowKind: "header", rowIndex: 0, cellIndex: 1 }, "next"),
+    ).toEqual({ rowKind: "body", rowIndex: 0, cellIndex: 0 });
+    expect(
+      navigateMarkdownTableCell(block, { rowKind: "body", rowIndex: 1, cellIndex: 0 }, "previous"),
+    ).toEqual({ rowKind: "body", rowIndex: 0, cellIndex: 1 });
+    expect(
+      navigateMarkdownTableCell(block, { rowKind: "body", rowIndex: 1, cellIndex: 1 }, "next"),
+    ).toBeNull();
+  });
+
+  it("creates append-row edits from table shape", () => {
+    const source = "| A | B |\n| --- | --- |\n| x | y |";
+    const block = parseMarkdownBlocks(source)[0];
+    if (block.kind !== "table") throw new Error("expected table block");
+
+    const edit = appendMarkdownTableRow(block);
+
+    expect(edit).not.toBeNull();
+    expect(applyMarkdownEdit(source, { changes: [(edit as NonNullable<typeof edit>).change] })).toBe(
+      "| A | B |\n| --- | --- |\n| x | y |\n|  |  |",
+    );
+    expect(edit?.target).toEqual({ rowKind: "body", rowIndex: 1, cellIndex: 0 });
+  });
+
+  it("combines last-cell updates with table row insertion", () => {
+    const source = "| A | B |\n| --- | --- |\n| alpha |  |";
+    const block = parseMarkdownBlocks(source)[0];
+    if (block.kind !== "table") throw new Error("expected table block");
+
+    const cellChange = updateMarkdownTableCell(
+      block,
+      { rowKind: "body", rowIndex: 0, cellIndex: 1 },
+      "beta",
+    );
+    const rowInsert = appendMarkdownTableRow(block);
+
+    expect(cellChange).not.toBeNull();
+    expect(rowInsert).not.toBeNull();
+    expect(
+      applyMarkdownEdit(source, {
+        changes: [cellChange as MarkdownTextChange, (rowInsert as NonNullable<typeof rowInsert>).change],
+      }),
+    ).toBe("| A | B |\n| --- | --- |\n| alpha | beta |\n|  |  |");
   });
 
   it("maps block ratio hits by line buckets instead of rounding into the next line", () => {

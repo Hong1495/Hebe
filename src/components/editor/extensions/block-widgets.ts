@@ -8,9 +8,11 @@ import katex from "katex";
 import { isTauriRuntime } from "../../../lib/ipc";
 import { dirname } from "../../../lib/path";
 import {
+  appendMarkdownTableRow,
   type MarkdownTableCellTarget,
   markdownBlockPositionFromHit,
   markdownSourceRangePositionFromRatio,
+  navigateMarkdownTableCell,
   parseMarkdownBlocks,
   type TableBlock,
   updateMarkdownTableCell,
@@ -419,6 +421,9 @@ function makeTableCellInput(
   input.type = "text";
   input.value = value;
   input.spellcheck = true;
+  input.dataset.tableRowKind = target.rowKind;
+  input.dataset.tableRowIndex = String(target.rowIndex);
+  input.dataset.tableCellIndex = String(target.cellIndex);
 
   const stop = (event: Event) => event.stopPropagation();
   input.addEventListener("mousedown", stop);
@@ -439,11 +444,16 @@ function makeTableCellInput(
   });
 
   let committedValue = value;
-  const commit = () => {
+  const pendingCellChange = () => {
     if (input.value === committedValue) return;
     const change = updateMarkdownTableCell(block, target, input.value);
     if (!change) return;
     committedValue = input.value;
+    return change;
+  };
+  const commit = () => {
+    const change = pendingCellChange();
+    if (!change) return;
     view.dispatch({
       changes: change,
       selection: { anchor: change.from + change.insert.length },
@@ -455,6 +465,48 @@ function makeTableCellInput(
   input.addEventListener("change", commit);
   input.addEventListener("keydown", (event) => {
     event.stopPropagation();
+    if (event.key === "Tab") {
+      event.preventDefault();
+      const direction = event.shiftKey ? "previous" : "next";
+      const nextTarget = navigateMarkdownTableCell(block, target, direction);
+      const change = pendingCellChange();
+
+      if (nextTarget) {
+        if (change) {
+          view.dispatch({
+            changes: change,
+            effects: setPreviewRevealRange.of(null),
+          });
+        }
+        focusMarkdownTableCellInput(view, nextTarget);
+        return;
+      }
+
+      if (!event.shiftKey) {
+        const rowInsert = appendMarkdownTableRow(block);
+        if (rowInsert) {
+          view.dispatch({
+            changes: change ? [change, rowInsert.change] : rowInsert.change,
+            selection: {
+              anchor: rowInsert.change.from + rowInsert.change.insert.length,
+            },
+            effects: setPreviewRevealRange.of(null),
+          });
+          focusMarkdownTableCellInput(view, rowInsert.target);
+          return;
+        }
+      }
+
+      if (change) {
+        view.dispatch({
+          changes: change,
+          selection: { anchor: change.from + change.insert.length },
+          effects: setPreviewRevealRange.of(null),
+        });
+      }
+      input.blur();
+      return;
+    }
     if (event.key === "Enter") {
       event.preventDefault();
       commit();
@@ -468,6 +520,21 @@ function makeTableCellInput(
   });
 
   cell.appendChild(input);
+}
+
+function focusMarkdownTableCellInput(view: EditorView, target: MarkdownTableCellTarget): void {
+  const selector = `.cm-markdown-table-cell-input[data-table-row-kind="${target.rowKind}"][data-table-row-index="${target.rowIndex}"][data-table-cell-index="${target.cellIndex}"]`;
+  const focus = () => {
+    const input = view.dom.querySelector<HTMLInputElement>(selector);
+    if (!input) return;
+    input.focus();
+    const cursor = input.value.length;
+    input.setSelectionRange(cursor, cursor);
+  };
+  requestAnimationFrame(() => {
+    focus();
+    requestAnimationFrame(focus);
+  });
 }
 
 interface EditableWidgetOptions {

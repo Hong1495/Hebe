@@ -32,6 +32,8 @@ export interface InlineSpan {
 }
 
 export interface TableCellSpan {
+  from: number;
+  to: number;
   contentFrom: number;
   contentTo: number;
 }
@@ -175,6 +177,13 @@ export interface MarkdownTableCellTarget {
   cellIndex: number;
 }
 
+export type MarkdownTableNavigationDirection = "next" | "previous";
+
+export interface MarkdownTableRowInsertEdit {
+  change: MarkdownTextChange;
+  target: MarkdownTableCellTarget;
+}
+
 interface SourceLine {
   number: number;
   from: number;
@@ -276,7 +285,7 @@ export function tableCellSpans(text: string): TableCellSpan[] {
     let contentTo = cell.to;
     while (contentFrom < contentTo && /\s/.test(text[contentFrom])) contentFrom += 1;
     while (contentTo > contentFrom && /\s/.test(text[contentTo - 1])) contentTo -= 1;
-    return { contentFrom, contentTo };
+    return { from: cell.from, to: cell.to, contentFrom, contentTo };
   });
 }
 
@@ -500,9 +509,52 @@ export function updateMarkdownTableCell(
   if (!span) return null;
 
   return {
-    from: row.lineFrom + span.contentFrom,
-    to: row.lineFrom + span.contentTo,
-    insert: normalizeMarkdownTableCellValue(value),
+    from: row.lineFrom + span.from,
+    to: row.lineFrom + span.to,
+    insert: normalizeMarkdownTableCellSource(value),
+  };
+}
+
+export function navigateMarkdownTableCell(
+  block: TableBlock,
+  target: MarkdownTableCellTarget,
+  direction: MarkdownTableNavigationDirection,
+): MarkdownTableCellTarget | null {
+  const columnCount = block.table.headers.length;
+  if (columnCount <= 0) return null;
+
+  const rows = editableTableRows(block);
+  const rowIndex = rows.findIndex(
+    (row) => row.rowKind === target.rowKind && row.rowIndex === target.rowIndex,
+  );
+  if (rowIndex < 0) return null;
+
+  const cellIndex = clampInt(target.cellIndex, 0, columnCount - 1);
+  const nextFlatIndex = rowIndex * columnCount + cellIndex + (direction === "next" ? 1 : -1);
+  if (nextFlatIndex < 0 || nextFlatIndex >= rows.length * columnCount) return null;
+
+  return {
+    ...rows[Math.floor(nextFlatIndex / columnCount)],
+    cellIndex: nextFlatIndex % columnCount,
+  };
+}
+
+export function appendMarkdownTableRow(block: TableBlock): MarkdownTableRowInsertEdit | null {
+  const columnCount = block.table.headers.length;
+  if (columnCount <= 0) return null;
+
+  const row = `| ${Array.from({ length: columnCount }, () => "").join(" | ")} |`;
+  return {
+    change: {
+      from: block.to,
+      to: block.to,
+      insert: `\n${row}`,
+    },
+    target: {
+      rowKind: "body",
+      rowIndex: block.table.rows.length,
+      cellIndex: 0,
+    },
   };
 }
 
@@ -691,6 +743,19 @@ function stripCommonLinePrefix(line: string): string {
 
 function normalizeMarkdownTableCellValue(value: string): string {
   return value.replace(/\r?\n/g, " ").trim().replace(/\|/g, "\\|");
+}
+
+function normalizeMarkdownTableCellSource(value: string): string {
+  return ` ${normalizeMarkdownTableCellValue(value)} `;
+}
+
+function editableTableRows(
+  block: TableBlock,
+): Array<Pick<MarkdownTableCellTarget, "rowKind" | "rowIndex">> {
+  return [
+    { rowKind: "header", rowIndex: 0 },
+    ...block.table.rows.map((_, rowIndex) => ({ rowKind: "body" as const, rowIndex })),
+  ];
 }
 
 function readFencedCodeBlock(
