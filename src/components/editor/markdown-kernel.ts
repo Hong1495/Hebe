@@ -36,6 +36,17 @@ export interface TableCellSpan {
   contentTo: number;
 }
 
+export type TableSourceRowKind = "header" | "delimiter" | "body";
+
+export interface TableSourceRow {
+  kind: TableSourceRowKind;
+  rowIndex: number;
+  lineNumber: number;
+  lineFrom: number;
+  lineTo: number;
+  cells: TableCellSpan[];
+}
+
 export interface MarkdownBlockBase {
   from: number;
   to: number;
@@ -64,6 +75,7 @@ export interface MathBlock extends MarkdownBlockBase {
 export interface TableBlock extends MarkdownBlockBase {
   kind: "table";
   table: ParsedTable;
+  sourceRows: TableSourceRow[];
 }
 
 export interface ImageBlock extends MarkdownBlockBase {
@@ -106,6 +118,20 @@ export interface MarkdownLineDecoration {
   replacements: MarkdownLineReplacement[];
   inlineSpans: MarkdownInlineDecoration[];
 }
+
+export type MarkdownBlockHit =
+  | {
+      kind: "block";
+      xRatio: number;
+      yRatio: number;
+    }
+  | {
+      kind: "tableCell";
+      rowKind: "header" | "body";
+      rowIndex: number;
+      cellIndex: number;
+      xRatio: number;
+    };
 
 interface SourceLine {
   number: number;
@@ -301,6 +327,43 @@ export function parseMarkdownBlocks(source: string): MarkdownBlock[] {
   return blocks.sort((a, b) => a.from - b.from || a.to - b.to);
 }
 
+export function markdownBlockPositionFromHit(
+  source: string,
+  block: MarkdownBlock,
+  hit: MarkdownBlockHit,
+): number {
+  if (hit.kind === "tableCell" && block.kind === "table") {
+    return tableBlockPositionFromCell(block, hit);
+  }
+
+  return markdownSourceRangePositionFromRatio(source, block.from, block.to, {
+    xRatio: hit.kind === "block" ? hit.xRatio : 0,
+    yRatio: hit.kind === "block" ? hit.yRatio : 0,
+  });
+}
+
+export function markdownSourceRangePositionFromRatio(
+  source: string,
+  from: number,
+  to: number,
+  hit: { xRatio: number; yRatio: number },
+): number {
+  const rangeFrom = clampInt(from, 0, source.length);
+  const rangeTo = clampInt(to, rangeFrom, source.length);
+  const lines = splitSourceLines(source).filter(
+    (line) => line.from <= rangeTo && line.to >= rangeFrom,
+  );
+  if (!lines.length) return rangeFrom;
+
+  const yRatio = clamp(hit.yRatio, 0, 1);
+  const lineIndex = Math.min(lines.length - 1, Math.floor(yRatio * lines.length));
+  const line = lines[lineIndex];
+  const lineFrom = Math.max(line.from, rangeFrom);
+  const lineTo = Math.min(line.to, rangeTo);
+  const xRatio = clamp(hit.xRatio, 0, 1);
+  return lineFrom + Math.round(xRatio * Math.max(0, lineTo - lineFrom));
+}
+
 export function scanMarkdownLineDecorations(
   source: string,
   revealLines: ReadonlySet<number> = new Set<number>(),
@@ -484,7 +547,50 @@ function readTableMarkdownBlock(
     endLine: lastLine.number,
     source: tableSource,
     table,
+    sourceRows: readTableSourceRows(lines, startIndex, endIndex),
   };
+}
+
+function readTableSourceRows(
+  lines: SourceLine[],
+  startIndex: number,
+  endIndex: number,
+): TableSourceRow[] {
+  const rows: TableSourceRow[] = [];
+
+  for (let index = startIndex; index <= endIndex; index++) {
+    const line = lines[index];
+    const offset = index - startIndex;
+    const kind: TableSourceRowKind = offset === 0 ? "header" : offset === 1 ? "delimiter" : "body";
+    rows.push({
+      kind,
+      rowIndex: kind === "body" ? offset - 2 : 0,
+      lineNumber: line.number,
+      lineFrom: line.from,
+      lineTo: line.to,
+      cells: tableCellSpans(line.text),
+    });
+  }
+
+  return rows;
+}
+
+function tableBlockPositionFromCell(
+  block: TableBlock,
+  hit: Extract<MarkdownBlockHit, { kind: "tableCell" }>,
+): number {
+  const row = block.sourceRows.find(
+    (sourceRow) => sourceRow.kind === hit.rowKind && sourceRow.rowIndex === hit.rowIndex,
+  );
+  if (!row) return block.from;
+
+  const span = row.cells[clampInt(hit.cellIndex, 0, Math.max(0, row.cells.length - 1))];
+  if (!span) return row.lineFrom;
+
+  const offset = Math.round(
+    span.contentFrom + clamp(hit.xRatio, 0, 1) * Math.max(0, span.contentTo - span.contentFrom),
+  );
+  return row.lineFrom + clampInt(offset, span.contentFrom, span.contentTo);
 }
 
 function readImageMarkdownBlock(source: string, line: SourceLine): ImageBlock | null {
@@ -954,4 +1060,12 @@ function unescapeMarkdownText(text: string): string {
 
 function isWord(char: string | undefined): boolean {
   return !!char && /[\p{L}\p{N}_]/u.test(char);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function clampInt(value: number, min: number, max: number): number {
+  return Math.round(clamp(value, min, max));
 }

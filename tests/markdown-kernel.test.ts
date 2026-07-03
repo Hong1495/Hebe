@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  markdownBlockPositionFromHit,
+  markdownSourceRangePositionFromRatio,
   parseImageLine,
   parseMarkdownBlocks,
   scanInlineMarkdownSpans,
@@ -45,6 +47,60 @@ describe("markdown kernel", () => {
         rows: [["x", "y"]],
       },
     });
+  });
+
+  it("keeps table source rows in the kernel", () => {
+    const source = "before\n| A | B |\n| :--- | ---: |\n| `x` | **y** |";
+    const block = parseMarkdownBlocks(source)[0];
+
+    expect(block).toMatchObject({
+      kind: "table",
+      sourceRows: [
+        { kind: "header", rowIndex: 0, lineNumber: 2 },
+        { kind: "delimiter", rowIndex: 0, lineNumber: 3 },
+        { kind: "body", rowIndex: 0, lineNumber: 4 },
+      ],
+    });
+  });
+
+  it("maps rendered table cell hits to source cell positions", () => {
+    const source = "before\n| A | B |\n| :--- | ---: |\n| `x` | **y** |\n| z | q |";
+    const block = parseMarkdownBlocks(source)[0];
+
+    const bodyCell = markdownBlockPositionFromHit(source, block, {
+      kind: "tableCell",
+      rowKind: "body",
+      rowIndex: 0,
+      cellIndex: 1,
+      xRatio: 0,
+    });
+    const secondBodyCell = markdownBlockPositionFromHit(source, block, {
+      kind: "tableCell",
+      rowKind: "body",
+      rowIndex: 1,
+      cellIndex: 0,
+      xRatio: 0,
+    });
+
+    expect(bodyCell).toBe(source.indexOf("**y**"));
+    expect(secondBodyCell).toBe(source.indexOf("z"));
+  });
+
+  it("maps block ratio hits by line buckets instead of rounding into the next line", () => {
+    const source = "```js\nconst a = 1;\nconst b = 2;\n```";
+    const block = parseMarkdownBlocks(source)[0];
+
+    const firstLine = markdownSourceRangePositionFromRatio(source, block.from, block.to, {
+      xRatio: 0,
+      yRatio: 0.24,
+    });
+    const secondLine = markdownSourceRangePositionFromRatio(source, block.from, block.to, {
+      xRatio: 0,
+      yRatio: 0.25,
+    });
+
+    expect(firstLine).toBe(0);
+    expect(secondLine).toBe(source.indexOf("const a"));
   });
 
   it("parses standalone image lines with markdown path forms", () => {

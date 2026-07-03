@@ -7,7 +7,12 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import katex from "katex";
 import { isTauriRuntime } from "../../../lib/ipc";
 import { dirname } from "../../../lib/path";
-import { type ParsedTable, parseMarkdownBlocks, tableCellSpans } from "../markdown-kernel";
+import {
+  markdownBlockPositionFromHit,
+  markdownSourceRangePositionFromRatio,
+  parseMarkdownBlocks,
+  type TableBlock,
+} from "../markdown-kernel";
 import {
   editorFocusedField,
   previewDecorationsNeedRefresh,
@@ -273,15 +278,15 @@ class ImageWidget extends WidgetType {
 }
 
 class TableWidget extends WidgetType {
-  readonly table: ParsedTable;
+  readonly block: TableBlock;
   private readonly key: string;
   private readonly revealFrom: number;
   private readonly revealTo: number;
 
-  constructor(table: ParsedTable, revealFrom: number, revealTo: number) {
+  constructor(block: TableBlock, revealFrom: number, revealTo: number) {
     super();
-    this.table = table;
-    this.key = JSON.stringify(table);
+    this.block = block;
+    this.key = JSON.stringify(block.table);
     this.revealFrom = revealFrom;
     this.revealTo = revealTo;
   }
@@ -297,31 +302,33 @@ class TableWidget extends WidgetType {
   toDOM(view: EditorView): HTMLElement {
     const wrapper = document.createElement("div");
     wrapper.className = "cm-markdown-table-wrap";
-    makeTableWidgetEditable(wrapper, view, this.revealFrom, this.revealTo);
+    makeTableWidgetEditable(wrapper, view, this.block);
 
     const table = document.createElement("table");
     table.className = "cm-markdown-table";
 
     const thead = document.createElement("thead");
     const headerRow = document.createElement("tr");
-    headerRow.dataset.sourceLineOffset = "0";
-    this.table.headers.forEach((cell, index) => {
+    headerRow.dataset.tableRowKind = "header";
+    headerRow.dataset.tableRowIndex = "0";
+    this.block.table.headers.forEach((cell, index) => {
       const th = document.createElement("th");
       th.textContent = cell;
-      th.style.textAlign = this.table.align[index] ?? "left";
+      th.style.textAlign = this.block.table.align[index] ?? "left";
       headerRow.appendChild(th);
     });
     thead.appendChild(headerRow);
     table.appendChild(thead);
 
     const tbody = document.createElement("tbody");
-    this.table.rows.forEach((row, rowIndex) => {
+    this.block.table.rows.forEach((row, rowIndex) => {
       const tr = document.createElement("tr");
-      tr.dataset.sourceLineOffset = String(rowIndex + 2);
-      this.table.headers.forEach((_, index) => {
+      tr.dataset.tableRowKind = "body";
+      tr.dataset.tableRowIndex = String(rowIndex);
+      this.block.table.headers.forEach((_, index) => {
         const td = document.createElement("td");
         td.textContent = row[index] ?? "";
-        td.style.textAlign = this.table.align[index] ?? "left";
+        td.style.textAlign = this.block.table.align[index] ?? "left";
         tr.appendChild(td);
       });
       tbody.appendChild(tr);
@@ -373,24 +380,14 @@ function blockClickPosition(
   to: number,
 ): number {
   const doc = view.state.doc;
-  const startLineNo = doc.lineAt(Math.min(from, doc.length)).number;
-  const endLineNo = doc.lineAt(Math.min(to, doc.length)).number;
   const rect = element.getBoundingClientRect();
-  const yRatio = rect.height > 0 ? clamp((event.clientY - rect.top) / rect.height, 0, 1) : 0;
-  const lineCount = Math.max(1, endLineNo - startLineNo + 1);
-  const lineNo = startLineNo + Math.min(lineCount - 1, Math.floor(yRatio * lineCount));
-  const line = doc.line(lineNo);
-  const xRatio = rect.width > 0 ? clamp((event.clientX - rect.left) / rect.width, 0, 1) : 0;
-  const offset = Math.round(xRatio * line.length);
-  return line.from + clampInt(offset, 0, line.length);
+  return markdownSourceRangePositionFromRatio(doc.toString(), from, to, {
+    xRatio: rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0,
+    yRatio: rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0,
+  });
 }
 
-function makeTableWidgetEditable(
-  element: HTMLElement,
-  view: EditorView,
-  from: number,
-  to: number,
-): void {
+function makeTableWidgetEditable(element: HTMLElement, view: EditorView, block: TableBlock): void {
   element.classList.add("cm-editable-widget");
   element.tabIndex = 0;
 
@@ -399,11 +396,11 @@ function makeTableWidgetEditable(
     event.stopPropagation();
     const pos =
       event instanceof MouseEvent
-        ? tableClickPosition(event, element, view, from, to)
-        : Math.min(from, view.state.doc.length);
+        ? tableClickPosition(event, element, view, block)
+        : Math.min(block.from, view.state.doc.length);
     view.dispatch({
       selection: { anchor: pos, head: pos },
-      effects: setPreviewRevealRange.of({ from, to }),
+      effects: setPreviewRevealRange.of({ from: block.from, to: block.to }),
       scrollIntoView: true,
     });
     view.focus();
@@ -419,48 +416,26 @@ function tableClickPosition(
   event: MouseEvent,
   wrapper: HTMLElement,
   view: EditorView,
-  from: number,
-  to: number,
+  block: TableBlock,
 ): number {
   const target = event.target instanceof Element ? event.target : null;
   const cell = target?.closest("th,td") as HTMLTableCellElement | null;
-  if (!cell || !wrapper.contains(cell)) return Math.min(from, view.state.doc.length);
+  if (!cell || !wrapper.contains(cell)) {
+    return blockClickPosition(event, wrapper, view, block.from, block.to);
+  }
 
   const row = cell.closest("tr");
-  const section = row?.parentElement;
-  if (!row || !section) return Math.min(from, view.state.doc.length);
-
-  const sourceLineOffset = Number.parseInt(row.dataset.sourceLineOffset ?? "", 10);
-  const rowIndex = Array.from(section.children).indexOf(row);
-  const fallbackLineOffset = section.tagName.toLowerCase() === "thead" ? 0 : rowIndex + 2;
-  const doc = view.state.doc;
-  const startLineNo = doc.lineAt(Math.min(from, doc.length)).number;
-  const endLineNo = doc.lineAt(Math.min(to, doc.length)).number;
-  const lineNo = clampInt(
-    startLineNo + (Number.isFinite(sourceLineOffset) ? sourceLineOffset : fallbackLineOffset),
-    startLineNo,
-    endLineNo,
-  );
-  const line = doc.line(lineNo);
-
-  const spans = tableCellSpans(line.text);
-  const span = spans[clampInt(cell.cellIndex, 0, Math.max(0, spans.length - 1))];
-  if (!span) return line.from;
+  if (!row) return Math.min(block.from, view.state.doc.length);
 
   const rect = cell.getBoundingClientRect();
-  const ratio = rect.width > 0 ? clamp((event.clientX - rect.left) / rect.width, 0, 1) : 0;
-  const offset = Math.round(
-    span.contentFrom + ratio * Math.max(0, span.contentTo - span.contentFrom),
-  );
-  return line.from + clampInt(offset, span.contentFrom, span.contentTo);
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function clampInt(value: number, min: number, max: number): number {
-  return Math.round(clamp(value, min, max));
+  const rowIndex = Number.parseInt(row.dataset.tableRowIndex ?? "0", 10);
+  return markdownBlockPositionFromHit(view.state.doc.toString(), block, {
+    kind: "tableCell",
+    rowKind: row.dataset.tableRowKind === "body" ? "body" : "header",
+    rowIndex: Number.isFinite(rowIndex) ? rowIndex : 0,
+    cellIndex: cell.cellIndex,
+    xRatio: rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0,
+  });
 }
 
 function createFallbackText(message: string): HTMLElement {
@@ -520,7 +495,7 @@ function blockDecorations(state: EditorState, mdPath: string | null): Decoration
           from: block.from,
           to: block.to,
           widget: Decoration.replace({
-            widget: new TableWidget(block.table, block.from, block.to),
+            widget: new TableWidget(block, block.from, block.to),
             block: true,
           }),
         });
