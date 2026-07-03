@@ -7,6 +7,7 @@ import {
   insertMarkdownTableColumn,
   insertMarkdownTableRow,
   isMarkdownFormatCommand,
+  markdownBlockProjection,
   markdownBlockPositionFromHit,
   markdownSourceRangePositionFromRatio,
   navigateMarkdownTableCell,
@@ -389,6 +390,56 @@ describe("markdown kernel", () => {
       startLine: 1,
       endLine: 5,
       content: "flowchart LR\n    B1 ~~~ C1\n    B2 ~~~ C2",
+    });
+  });
+
+  it("creates unified block projection targets for Mermaid and code fences", () => {
+    const source = "```mermaid\nflowchart TD\n  A-->B\n```\n\n```js\nalpha();\nbeta();\n```";
+    const blocks = parseMarkdownBlocks(source);
+    const mermaid = blocks[0];
+    const code = blocks[1];
+    if (mermaid.kind !== "fencedCode" || code.kind !== "fencedCode") {
+      throw new Error("expected fenced code blocks");
+    }
+
+    expect(markdownBlockProjection(mermaid)).toEqual({
+      revealFrom: mermaid.from,
+      revealTo: mermaid.to,
+      cursorFrom: mermaid.contentFrom,
+      cursorTo: mermaid.contentTo,
+      clickMode: "contentStart",
+    });
+    expect(markdownBlockProjection(code)).toEqual({
+      revealFrom: code.from,
+      revealTo: code.to,
+      cursorFrom: code.contentFrom,
+      cursorTo: code.contentTo,
+      clickMode: "content",
+    });
+  });
+
+  it("creates unified block projection targets for math and images", () => {
+    const source = "$$\na+b\n$$\n\n![Alt](assets/a.png)";
+    const blocks = parseMarkdownBlocks(source);
+    const math = blocks[0];
+    const image = blocks[1];
+    if (math.kind !== "mathBlock" || image.kind !== "image") {
+      throw new Error("expected math and image blocks");
+    }
+
+    expect(markdownBlockProjection(math)).toEqual({
+      revealFrom: math.from,
+      revealTo: math.to,
+      cursorFrom: math.contentFrom,
+      cursorTo: math.contentTo,
+      clickMode: "range",
+    });
+    expect(markdownBlockProjection(image)).toEqual({
+      revealFrom: image.from,
+      revealTo: image.to,
+      cursorFrom: image.from,
+      cursorTo: image.to,
+      clickMode: "range",
     });
   });
 

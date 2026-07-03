@@ -100,6 +100,16 @@ export interface InlineMathSpan {
 
 export type MarkdownBlock = FencedCodeBlock | MathBlock | TableBlock | ImageBlock | InlineMathSpan;
 
+export type MarkdownBlockProjectionClickMode = "range" | "content" | "contentStart";
+
+export interface MarkdownBlockProjection {
+  revealFrom: number;
+  revealTo: number;
+  cursorFrom: number;
+  cursorTo: number;
+  clickMode: MarkdownBlockProjectionClickMode;
+}
+
 export interface MarkdownLineReplacement {
   kind: "hide" | "listMarker";
   from: number;
@@ -418,6 +428,47 @@ export function markdownBlockPositionFromHit(
     xRatio: hit.kind === "block" ? hit.xRatio : 0,
     yRatio: hit.kind === "block" ? hit.yRatio : 0,
   });
+}
+
+export function markdownBlockProjection(block: MarkdownBlock): MarkdownBlockProjection {
+  switch (block.kind) {
+    case "fencedCode":
+      return {
+        revealFrom: block.from,
+        revealTo: block.to,
+        cursorFrom: block.contentFrom,
+        cursorTo: block.contentTo,
+        clickMode: block.isMermaid ? "contentStart" : "content",
+      };
+
+    case "mathBlock":
+      return {
+        revealFrom: block.from,
+        revealTo: block.to,
+        cursorFrom: block.contentFrom,
+        cursorTo: block.contentTo,
+        clickMode: "range",
+      };
+
+    case "image":
+    case "table":
+      return {
+        revealFrom: block.from,
+        revealTo: block.to,
+        cursorFrom: block.from,
+        cursorTo: block.to,
+        clickMode: "range",
+      };
+
+    case "inlineMath":
+      return {
+        revealFrom: block.from,
+        revealTo: block.to,
+        cursorFrom: block.contentFrom,
+        cursorTo: block.contentTo,
+        clickMode: "range",
+      };
+  }
 }
 
 export function markdownSourceRangePositionFromRatio(

@@ -13,9 +13,11 @@ import {
   deleteMarkdownTableRow,
   insertMarkdownTableColumn,
   insertMarkdownTableRow,
+  type MarkdownBlockProjection,
   type MarkdownTableCellTarget,
   type MarkdownTableEdit,
   markdownBlockPositionFromHit,
+  markdownBlockProjection,
   markdownSourceRangePositionFromRatio,
   navigateMarkdownTableCell,
   parseMarkdownBlocks,
@@ -54,47 +56,32 @@ const codeHighlighter = tagHighlighter([
 class MathWidget extends WidgetType {
   readonly latex: string;
   readonly displayMode: boolean;
-  private readonly revealFrom: number | null;
-  private readonly revealTo: number | null;
-  private readonly cursorFrom: number | null;
-  private readonly cursorTo: number | null;
+  private readonly projection: MarkdownBlockProjection | null;
 
   constructor(
     latex: string,
     displayMode: boolean,
-    revealFrom: number | null = null,
-    revealTo: number | null = null,
-    cursorFrom: number | null = null,
-    cursorTo: number | null = null,
+    projection: MarkdownBlockProjection | null = null,
   ) {
     super();
     this.latex = latex;
     this.displayMode = displayMode;
-    this.revealFrom = revealFrom;
-    this.revealTo = revealTo;
-    this.cursorFrom = cursorFrom;
-    this.cursorTo = cursorTo;
+    this.projection = projection;
   }
 
   override eq(other: MathWidget): boolean {
     return (
       other.latex === this.latex &&
       other.displayMode === this.displayMode &&
-      other.revealFrom === this.revealFrom &&
-      other.revealTo === this.revealTo &&
-      other.cursorFrom === this.cursorFrom &&
-      other.cursorTo === this.cursorTo
+      markdownBlockProjectionKey(other.projection) === markdownBlockProjectionKey(this.projection)
     );
   }
 
   toDOM(view: EditorView): HTMLElement {
     const span = document.createElement("span");
     span.className = this.displayMode ? "cm-math-block" : "cm-math-inline";
-    if (this.revealFrom !== null) {
-      makeEditableWidget(span, view, this.revealFrom, this.revealTo ?? this.revealFrom, {
-        cursorFrom: this.cursorFrom ?? this.revealFrom,
-        cursorTo: this.cursorTo ?? this.revealTo ?? this.revealFrom,
-      });
+    if (this.projection) {
+      makeEditableWidget(span, view, this.projection);
     }
     try {
       katex.render(this.latex, span, {
@@ -116,45 +103,26 @@ class MathWidget extends WidgetType {
 class MermaidWidget extends WidgetType {
   readonly code: string;
   private id: string;
-  private readonly revealFrom: number;
-  private readonly revealTo: number;
-  private readonly cursorFrom: number;
-  private readonly cursorTo: number;
+  private readonly projection: MarkdownBlockProjection;
 
-  constructor(
-    code: string,
-    revealFrom: number,
-    revealTo: number,
-    cursorFrom: number,
-    cursorTo: number,
-  ) {
+  constructor(code: string, projection: MarkdownBlockProjection) {
     super();
     this.code = code;
     this.id = `mermaid-${(widgetIdCounter++).toString(36)}`;
-    this.revealFrom = revealFrom;
-    this.revealTo = revealTo;
-    this.cursorFrom = cursorFrom;
-    this.cursorTo = cursorTo;
+    this.projection = projection;
   }
 
   override eq(other: MermaidWidget): boolean {
     return (
       other.code === this.code &&
-      other.revealFrom === this.revealFrom &&
-      other.revealTo === this.revealTo &&
-      other.cursorFrom === this.cursorFrom &&
-      other.cursorTo === this.cursorTo
+      markdownBlockProjectionKey(other.projection) === markdownBlockProjectionKey(this.projection)
     );
   }
 
   toDOM(view: EditorView): HTMLElement {
     const container = document.createElement("div");
     container.className = "cm-mermaid-container";
-    makeEditableWidget(container, view, this.revealFrom, this.revealTo, {
-      cursorFrom: this.cursorFrom,
-      cursorTo: this.cursorTo,
-      positionFromEvent: () => this.cursorFrom,
-    });
+    makeEditableWidget(container, view, this.projection);
 
     const fallback = document.createElement("pre");
     fallback.className = "cm-mermaid-code";
@@ -192,36 +160,20 @@ class MermaidWidget extends WidgetType {
 class CodeBlockWidget extends WidgetType {
   readonly code: string;
   private readonly language: string | null;
-  private readonly revealFrom: number;
-  private readonly revealTo: number;
-  private readonly cursorFrom: number;
-  private readonly cursorTo: number;
+  private readonly projection: MarkdownBlockProjection;
 
-  constructor(
-    code: string,
-    language: string | null,
-    revealFrom: number,
-    revealTo: number,
-    cursorFrom: number,
-    cursorTo: number,
-  ) {
+  constructor(code: string, language: string | null, projection: MarkdownBlockProjection) {
     super();
     this.code = code;
     this.language = language;
-    this.revealFrom = revealFrom;
-    this.revealTo = revealTo;
-    this.cursorFrom = cursorFrom;
-    this.cursorTo = cursorTo;
+    this.projection = projection;
   }
 
   override eq(other: CodeBlockWidget): boolean {
     return (
       other.code === this.code &&
       other.language === this.language &&
-      other.revealFrom === this.revealFrom &&
-      other.revealTo === this.revealTo &&
-      other.cursorFrom === this.cursorFrom &&
-      other.cursorTo === this.cursorTo
+      markdownBlockProjectionKey(other.projection) === markdownBlockProjectionKey(this.projection)
     );
   }
 
@@ -233,11 +185,14 @@ class CodeBlockWidget extends WidgetType {
     const code = document.createElement("code");
     code.textContent = this.code;
     pre.appendChild(code);
-    makeEditableWidget(pre, view, this.revealFrom, this.revealTo, {
-      cursorFrom: this.cursorFrom,
-      cursorTo: this.cursorTo,
+    makeEditableWidget(pre, view, this.projection, {
       positionFromEvent: (event) =>
-        codeBlockPositionFromEvent(event, code, this.cursorFrom, this.cursorTo),
+        codeBlockPositionFromEvent(
+          event,
+          code,
+          this.projection.cursorFrom,
+          this.projection.cursorTo,
+        ),
     });
 
     if (this.language) {
@@ -290,29 +245,26 @@ async function highlightCodeElement(
 class ImageWidget extends WidgetType {
   readonly alt: string;
   readonly src: string;
-  private readonly revealFrom: number;
-  private readonly revealTo: number;
+  private readonly projection: MarkdownBlockProjection;
 
-  constructor(alt: string, src: string, revealFrom: number, revealTo: number) {
+  constructor(alt: string, src: string, projection: MarkdownBlockProjection) {
     super();
     this.alt = alt;
     this.src = src;
-    this.revealFrom = revealFrom;
-    this.revealTo = revealTo;
+    this.projection = projection;
   }
 
   override eq(other: ImageWidget): boolean {
     return (
       other.src === this.src &&
-      other.revealFrom === this.revealFrom &&
-      other.revealTo === this.revealTo
+      markdownBlockProjectionKey(other.projection) === markdownBlockProjectionKey(this.projection)
     );
   }
 
   toDOM(view: EditorView): HTMLElement {
     const container = document.createElement("div");
     container.className = "cm-image-container";
-    makeEditableWidget(container, view, this.revealFrom, this.revealTo);
+    makeEditableWidget(container, view, this.projection);
 
     const img = document.createElement("img");
     img.src = this.src;
@@ -718,33 +670,30 @@ function focusMarkdownTableCellInput(
 }
 
 interface EditableWidgetOptions {
-  cursorFrom?: number;
-  cursorTo?: number;
   positionFromEvent?: (event: MouseEvent) => number | null;
 }
 
 function makeEditableWidget(
   element: HTMLElement,
   view: EditorView,
-  from: number,
-  to: number,
+  projection: MarkdownBlockProjection,
   options: EditableWidgetOptions = {},
 ): void {
   element.classList.add("cm-editable-widget");
   element.tabIndex = 0;
-  const cursorFrom = options.cursorFrom ?? from;
-  const cursorTo = options.cursorTo ?? to;
   const reveal = (event: Event) => {
     event.preventDefault();
     event.stopPropagation();
     const pos =
       event instanceof MouseEvent
-        ? (options.positionFromEvent?.(event) ??
-          blockClickPosition(event, element, view, cursorFrom, cursorTo))
-        : Math.min(cursorFrom, view.state.doc.length);
+        ? projectedBlockClickPosition(event, element, view, projection, options)
+        : Math.min(projection.cursorFrom, view.state.doc.length);
     view.dispatch({
       selection: { anchor: pos, head: pos },
-      effects: setPreviewRevealRange.of({ from, to }),
+      effects: setPreviewRevealRange.of({
+        from: projection.revealFrom,
+        to: projection.revealTo,
+      }),
       scrollIntoView: true,
     });
     view.focus();
@@ -753,6 +702,31 @@ function makeEditableWidget(
   element.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") reveal(event);
   });
+}
+
+function markdownBlockProjectionKey(projection: MarkdownBlockProjection | null): string {
+  return projection
+    ? `${projection.revealFrom}:${projection.revealTo}:${projection.cursorFrom}:${projection.cursorTo}:${projection.clickMode}`
+    : "";
+}
+
+function projectedBlockClickPosition(
+  event: MouseEvent,
+  element: HTMLElement,
+  view: EditorView,
+  projection: MarkdownBlockProjection,
+  options: EditableWidgetOptions,
+): number {
+  if (projection.clickMode === "contentStart") {
+    return Math.min(projection.cursorFrom, view.state.doc.length);
+  }
+
+  if (projection.clickMode === "content") {
+    const pos = options.positionFromEvent?.(event);
+    if (pos !== null && pos !== undefined) return pos;
+  }
+
+  return blockClickPosition(event, element, view, projection.cursorFrom, projection.cursorTo);
 }
 
 function blockClickPosition(
@@ -912,6 +886,7 @@ function blockDecorations(state: EditorState, mdPath: string | null): Decoration
   for (const block of parseMarkdownBlocks(state.doc.toString())) {
     const revealFrom = block.kind === "inlineMath" ? block.lineFrom : block.from;
     const revealTo = block.kind === "inlineMath" ? block.lineTo : block.to;
+    const projection = markdownBlockProjection(block);
     if (block.kind !== "table" && rangeIsRevealed(state, revealRange, revealFrom, revealTo)) {
       continue;
     }
@@ -923,21 +898,8 @@ function blockDecorations(state: EditorState, mdPath: string | null): Decoration
           to: block.to,
           widget: Decoration.replace({
             widget: block.isMermaid
-              ? new MermaidWidget(
-                  block.content,
-                  block.from,
-                  block.to,
-                  block.contentFrom,
-                  block.contentTo,
-                )
-              : new CodeBlockWidget(
-                  block.content,
-                  block.language,
-                  block.from,
-                  block.to,
-                  block.contentFrom,
-                  block.contentTo,
-                ),
+              ? new MermaidWidget(block.content, projection)
+              : new CodeBlockWidget(block.content, block.language, projection),
             block: true,
           }),
         });
@@ -948,14 +910,7 @@ function blockDecorations(state: EditorState, mdPath: string | null): Decoration
           from: block.from,
           to: block.to,
           widget: Decoration.replace({
-            widget: new MathWidget(
-              block.content,
-              true,
-              block.from,
-              block.to,
-              block.contentFrom,
-              block.contentTo,
-            ),
+            widget: new MathWidget(block.content, true, projection),
             block: true,
           }),
         });
@@ -977,12 +932,7 @@ function blockDecorations(state: EditorState, mdPath: string | null): Decoration
           from: block.from,
           to: block.to,
           widget: Decoration.replace({
-            widget: new ImageWidget(
-              block.alt,
-              resolveImageSrc(block.src, mdPath),
-              block.from,
-              block.to,
-            ),
+            widget: new ImageWidget(block.alt, resolveImageSrc(block.src, mdPath), projection),
             block: true,
           }),
         });
@@ -993,14 +943,7 @@ function blockDecorations(state: EditorState, mdPath: string | null): Decoration
           from: block.from,
           to: block.to,
           widget: Decoration.replace({
-            widget: new MathWidget(
-              block.latex,
-              false,
-              block.from,
-              block.to,
-              block.contentFrom,
-              block.contentTo,
-            ),
+            widget: new MathWidget(block.latex, false, projection),
           }),
         });
         break;
