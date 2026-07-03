@@ -249,6 +249,11 @@ function rangeIsCurrentlyRevealed(state: EditorState, from: number, to: number):
   );
 }
 
+function rangeIsExplicitlyRevealed(state: EditorState, from: number, to: number): boolean {
+  const revealRange = state.field(previewRevealRangeField, false) ?? null;
+  return revealRange !== null && revealRange.from <= to && revealRange.to >= from;
+}
+
 export const pasteImagePlugin = (mdPath: string | null) =>
   EditorView.domEventHandlers({
     paste(event: ClipboardEvent, view: EditorView) {
@@ -324,6 +329,15 @@ export const clickRevealPlugin = (() => {
 
       const click = clickPositionFromEvent(event, view);
       if (!click) return false;
+      if (rangeIsExplicitlyRevealed(view.state, click.lineFrom, click.lineTo)) {
+        event.preventDefault();
+        view.dispatch({
+          selection: { anchor: click.pos, head: click.pos },
+        });
+        view.focus();
+        return true;
+      }
+
       if (rangeIsCurrentlyRevealed(view.state, click.lineFrom, click.lineTo)) return false;
 
       event.preventDefault();

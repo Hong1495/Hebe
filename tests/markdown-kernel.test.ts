@@ -174,6 +174,25 @@ describe("markdown kernel", () => {
     expect(lastContentLine).toBe(source.indexOf("beta"));
   });
 
+  it("keeps tilde Mermaid edges inside backtick fences", () => {
+    const source = [
+      "```mermaid",
+      "flowchart LR",
+      "    B1 ~~~ C1",
+      "    B2 ~~~ C2",
+      "```",
+    ].join("\n");
+    const block = parseMarkdownBlocks(source)[0];
+
+    expect(block).toMatchObject({
+      kind: "fencedCode",
+      isMermaid: true,
+      startLine: 1,
+      endLine: 5,
+      content: "flowchart LR\n    B1 ~~~ C1\n    B2 ~~~ C2",
+    });
+  });
+
   it("parses standalone image lines with markdown path forms", () => {
     expect(parseImageLine("![](assets/image-1.png)")).toEqual({
       alt: "",
