@@ -43,6 +43,8 @@ export const previewRevealRangeField = StateField.define<PreviewRevealRange | nu
         }
       : null;
 
+    if (tr.docChanged) next = null;
+
     for (const effect of tr.effects) {
       if (effect.is(setPreviewRevealRange)) next = effect.value;
       if (effect.is(setEditorFocused) && !effect.value) next = null;

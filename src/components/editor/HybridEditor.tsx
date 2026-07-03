@@ -39,6 +39,17 @@ const markdownHighlightStyle = HighlightStyle.define([
 
 const externalContentSync = Annotation.define<boolean>();
 
+declare global {
+  interface Window {
+    __HEBE_EDITOR_TEST__?: {
+      getDocument: () => string;
+      getSelection: () => { from: number; to: number };
+      setDocument: (content: string) => void;
+      setSelection: (from: number, to?: number) => void;
+    };
+  }
+}
+
 function hybridPreviewExtensions(sourceMode: boolean, mdPath: string | null): Extension[] {
   return sourceMode
     ? []
@@ -83,12 +94,27 @@ export function HybridEditor({
     if (!containerRef.current || viewRef.current) return;
     const previewCompartment = previewCompartmentRef.current;
     if (!previewCompartment) return;
+    let testBridge: HTMLElement | null = null;
+    let bridgedView: EditorView | null = null;
+    let removeTestBridgeListeners: (() => void) | null = null;
+
+    const syncTestBridge = () => {
+      if (!testBridge || !bridgedView) return;
+      const selection = bridgedView.state.selection.main;
+      testBridge.dataset.document = bridgedView.state.doc.toString();
+      testBridge.dataset.selectionFrom = String(selection.from);
+      testBridge.dataset.selectionTo = String(selection.to);
+    };
 
     const updateContent = EditorView.updateListener.of((update) => {
       const externalUpdate = update.transactions.some((tr) => tr.annotation(externalContentSync));
       if (update.docChanged && !externalUpdate && onContentChange) {
         onContentChange(update.state.doc.toString());
       }
+    });
+    const updateTestBridge = EditorView.updateListener.of((update) => {
+      if (!import.meta.env.DEV || (!update.docChanged && !update.selectionSet)) return;
+      queueMicrotask(syncTestBridge);
     });
 
     const editorKeymap = keymap.of([
@@ -155,18 +181,81 @@ export function HybridEditor({
       syntaxHighlighting(markdownHighlightStyle),
 
       updateContent,
+      updateTestBridge,
     ];
 
     const state = EditorState.create({ doc: initialContent, extensions });
     const view = new EditorView({ state, parent: containerRef.current });
 
     viewRef.current = view;
+    bridgedView = view;
+    if (import.meta.env.DEV) {
+      window.__HEBE_EDITOR_TEST__ = {
+        getDocument: () => view.state.doc.toString(),
+        getSelection: () => {
+          const selection = view.state.selection.main;
+          return { from: selection.from, to: selection.to };
+        },
+        setDocument: (content) => {
+          view.dispatch({
+            changes: { from: 0, to: view.state.doc.length, insert: content },
+            selection: { anchor: 0, head: 0 },
+            annotations: externalContentSync.of(true),
+          });
+        },
+        setSelection: (from, to = from) => {
+          view.dispatch({ selection: { anchor: from, head: to } });
+        },
+      };
+
+      testBridge = document.createElement("div");
+      testBridge.id = "hebe-editor-test-bridge";
+      testBridge.hidden = true;
+      testBridge.setAttribute("aria-hidden", "true");
+      document.body.appendChild(testBridge);
+
+      const setDocument = () => {
+        view.dispatch({
+          changes: {
+            from: 0,
+            to: view.state.doc.length,
+            insert: testBridge?.dataset.document ?? "",
+          },
+          selection: { anchor: 0, head: 0 },
+          annotations: externalContentSync.of(true),
+        });
+        syncTestBridge();
+      };
+      const setSelection = () => {
+        const from = Number.parseInt(testBridge?.dataset.selectionFrom ?? "0", 10);
+        const to = Number.parseInt(testBridge?.dataset.selectionTo ?? String(from), 10);
+        if (!Number.isFinite(from) || !Number.isFinite(to)) return;
+        view.dispatch({ selection: { anchor: from, head: to } });
+        syncTestBridge();
+      };
+      const getState = () => syncTestBridge();
+
+      testBridge.addEventListener("hebe:set-document", setDocument);
+      testBridge.addEventListener("hebe:set-selection", setSelection);
+      testBridge.addEventListener("hebe:get-state", getState);
+      removeTestBridgeListeners = () => {
+        testBridge?.removeEventListener("hebe:set-document", setDocument);
+        testBridge?.removeEventListener("hebe:set-selection", setSelection);
+        testBridge?.removeEventListener("hebe:get-state", getState);
+        testBridge?.remove();
+        testBridge = null;
+      };
+      syncTestBridge();
+    }
     setIsReady(true);
     onEditorView?.(view);
 
     return () => {
+      if (import.meta.env.DEV) delete window.__HEBE_EDITOR_TEST__;
+      removeTestBridgeListeners?.();
       view.destroy();
       viewRef.current = null;
+      bridgedView = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
