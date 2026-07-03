@@ -394,13 +394,19 @@ function refineCursorAfterReveal(
     },
     write(pos, measuringView) {
       if (pos === null) return;
-      const line = measuringView.state.doc.lineAt(
-        Math.min(lineFrom, measuringView.state.doc.length),
-      );
-      const cursor = clampInt(pos, line.from, line.to);
-      const selection = measuringView.state.selection.main;
-      if (selection.empty && selection.from === cursor) return;
-      measuringView.dispatch({ selection: { anchor: cursor, head: cursor } });
+      requestAnimationFrame(() => {
+        try {
+          const line = measuringView.state.doc.lineAt(
+            Math.min(lineFrom, measuringView.state.doc.length),
+          );
+          const cursor = clampInt(pos, line.from, line.to);
+          const selection = measuringView.state.selection.main;
+          if (selection.empty && selection.from === cursor) return;
+          measuringView.dispatch({ selection: { anchor: cursor, head: cursor } });
+        } catch {
+          // The view may have been destroyed between measure and the next frame.
+        }
+      });
     },
   });
 }
