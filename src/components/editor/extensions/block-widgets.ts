@@ -9,11 +9,17 @@ import { isTauriRuntime } from "../../../lib/ipc";
 import { dirname } from "../../../lib/path";
 import {
   appendMarkdownTableRow,
+  deleteMarkdownTableColumn,
+  deleteMarkdownTableRow,
+  insertMarkdownTableColumn,
+  insertMarkdownTableRow,
   type MarkdownTableCellTarget,
+  type MarkdownTableEdit,
   markdownBlockPositionFromHit,
   markdownSourceRangePositionFromRatio,
   navigateMarkdownTableCell,
   parseMarkdownBlocks,
+  pasteMarkdownTableCells,
   type TableBlock,
   updateMarkdownTableCell,
 } from "../markdown-kernel";
@@ -463,8 +469,27 @@ function makeTableCellInput(
 
   input.addEventListener("blur", commit);
   input.addEventListener("change", commit);
+  input.addEventListener("paste", (event) => {
+    event.stopPropagation();
+    const text = event.clipboardData?.getData("text/plain") ?? "";
+    const edit = pasteMarkdownTableCells(block, target, text);
+    if (!edit) return;
+
+    event.preventDefault();
+    dispatchMarkdownTableEdit(view, edit);
+  });
   input.addEventListener("keydown", (event) => {
     event.stopPropagation();
+    if (event.isComposing) return;
+
+    const structureEdit = tableStructureEditForKey(event, block, target);
+    if (structureEdit) {
+      event.preventDefault();
+      const change = pendingCellChange();
+      dispatchMarkdownTableEdit(view, mergeMarkdownTableEdit(structureEdit, change));
+      return;
+    }
+
     if (event.key === "Tab") {
       event.preventDefault();
       const direction = event.shiftKey ? "previous" : "next";
@@ -547,6 +572,66 @@ function makeTableCellInput(
         });
       }
       input.blur();
+      return;
+    }
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      const atStart = input.selectionStart === 0 && input.selectionEnd === 0;
+      const atEnd =
+        input.selectionStart === input.value.length && input.selectionEnd === input.value.length;
+      if ((event.key === "ArrowLeft" && !atStart) || (event.key === "ArrowRight" && !atEnd)) {
+        return;
+      }
+
+      event.preventDefault();
+      const direction = event.key === "ArrowLeft" ? "previous" : "next";
+      const nextTarget = navigateMarkdownTableCell(block, target, direction);
+      const change = pendingCellChange();
+
+      if (nextTarget) {
+        if (change) {
+          view.dispatch({
+            changes: change,
+            effects: setPreviewRevealRange.of(null),
+          });
+        }
+        focusMarkdownTableCellInput(view, nextTarget, event.key === "ArrowLeft" ? "end" : "start");
+        return;
+      }
+
+      if (change) {
+        view.dispatch({
+          changes: change,
+          selection: { anchor: change.from + change.insert.length },
+          effects: setPreviewRevealRange.of(null),
+        });
+      }
+      return;
+    }
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      const direction = event.key === "ArrowUp" ? "up" : "down";
+      const nextTarget = navigateMarkdownTableCell(block, target, direction);
+      const change = pendingCellChange();
+
+      if (nextTarget) {
+        if (change) {
+          view.dispatch({
+            changes: change,
+            effects: setPreviewRevealRange.of(null),
+          });
+        }
+        focusMarkdownTableCellInput(view, nextTarget);
+        return;
+      }
+
+      if (change) {
+        view.dispatch({
+          changes: change,
+          selection: { anchor: change.from + change.insert.length },
+          effects: setPreviewRevealRange.of(null),
+        });
+      }
+      return;
     }
     if (event.key === "Escape") {
       event.preventDefault();
@@ -558,13 +643,72 @@ function makeTableCellInput(
   cell.appendChild(input);
 }
 
-function focusMarkdownTableCellInput(view: EditorView, target: MarkdownTableCellTarget): void {
+type TableCellFocusPlacement = "start" | "end";
+
+function dispatchMarkdownTableEdit(view: EditorView, edit: MarkdownTableEdit): void {
+  const changes = [...edit.changes].sort((a, b) => a.from - b.from || a.to - b.to);
+  view.dispatch({
+    changes: changes.length === 1 ? changes[0] : changes,
+    effects: setPreviewRevealRange.of(null),
+  });
+  if (edit.target) focusMarkdownTableCellInput(view, edit.target);
+}
+
+function mergeMarkdownTableEdit(
+  edit: MarkdownTableEdit,
+  change: ReturnType<typeof updateMarkdownTableCell> | undefined,
+): MarkdownTableEdit {
+  if (!change || edit.changes.some((editChange) => textChangesOverlap(change, editChange))) {
+    return edit;
+  }
+  return { ...edit, changes: [change, ...edit.changes] };
+}
+
+function textChangesOverlap(
+  first: { from: number; to: number },
+  second: { from: number; to: number },
+): boolean {
+  return first.from < second.to && second.from < first.to;
+}
+
+function tableStructureEditForKey(
+  event: KeyboardEvent,
+  block: TableBlock,
+  target: MarkdownTableCellTarget,
+): MarkdownTableEdit | null {
+  const mod = event.metaKey || event.ctrlKey;
+  if (!mod) return null;
+
+  if (event.altKey && event.key === "ArrowLeft") {
+    return insertMarkdownTableColumn(block, target, "before");
+  }
+  if (event.altKey && event.key === "ArrowRight") {
+    return insertMarkdownTableColumn(block, target, "after");
+  }
+  if (event.altKey && (event.key === "Backspace" || event.key === "Delete")) {
+    return deleteMarkdownTableColumn(block, target);
+  }
+  if (!event.altKey && event.key === "Enter") {
+    return insertMarkdownTableRow(block, target, event.shiftKey ? "before" : "after");
+  }
+  if (!event.altKey && (event.key === "Backspace" || event.key === "Delete")) {
+    return deleteMarkdownTableRow(block, target);
+  }
+
+  return null;
+}
+
+function focusMarkdownTableCellInput(
+  view: EditorView,
+  target: MarkdownTableCellTarget,
+  placement: TableCellFocusPlacement = "end",
+): void {
   const selector = `.cm-markdown-table-cell-input[data-table-row-kind="${target.rowKind}"][data-table-row-index="${target.rowIndex}"][data-table-cell-index="${target.cellIndex}"]`;
   const focus = () => {
     const input = view.dom.querySelector<HTMLInputElement>(selector);
     if (!input) return;
     input.focus();
-    const cursor = input.value.length;
+    const cursor = placement === "start" ? 0 : input.value.length;
     input.setSelectionRange(cursor, cursor);
   };
   requestAnimationFrame(() => {

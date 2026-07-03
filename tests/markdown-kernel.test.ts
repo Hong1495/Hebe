@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   appendMarkdownTableRow,
+  deleteMarkdownTableColumn,
+  deleteMarkdownTableRow,
   formatMarkdownSelection,
+  insertMarkdownTableColumn,
+  insertMarkdownTableRow,
   isMarkdownFormatCommand,
   markdownBlockPositionFromHit,
   markdownSourceRangePositionFromRatio,
   navigateMarkdownTableCell,
   type MarkdownTextChange,
+  pasteMarkdownTableCells,
   pasteMarkdownImage,
   parseImageLine,
   parseMarkdownBlocks,
@@ -223,6 +228,110 @@ describe("markdown kernel", () => {
         changes: [cellChange as MarkdownTextChange, (rowInsert as NonNullable<typeof rowInsert>).change],
       }),
     ).toBe("| A | B |\n| --- | --- |\n| alpha | beta |\n|  |  |");
+  });
+
+  it("inserts markdown table rows before and after projected targets", () => {
+    const source = "| A | B |\n| --- | --- |\n| x | y |\n| z | q |";
+    const block = parseMarkdownBlocks(source)[0];
+    if (block.kind !== "table") throw new Error("expected table block");
+
+    const before = insertMarkdownTableRow(
+      block,
+      { rowKind: "body", rowIndex: 1, cellIndex: 1 },
+      "before",
+    );
+    const afterHeader = insertMarkdownTableRow(
+      block,
+      { rowKind: "header", rowIndex: 0, cellIndex: 1 },
+      "after",
+    );
+
+    expect(before).not.toBeNull();
+    expect(applyMarkdownEdit(source, before as NonNullable<typeof before>)).toBe(
+      "| A | B |\n| --- | --- |\n| x | y |\n|  |  |\n| z | q |",
+    );
+    expect(before?.target).toEqual({ rowKind: "body", rowIndex: 1, cellIndex: 1 });
+    expect(applyMarkdownEdit(source, afterHeader as NonNullable<typeof afterHeader>)).toBe(
+      "| A | B |\n| --- | --- |\n|  |  |\n| x | y |\n| z | q |",
+    );
+  });
+
+  it("deletes markdown table body rows without removing the table header", () => {
+    const source = "| A | B |\n| --- | --- |\n| x | y |\n| z | q |";
+    const block = parseMarkdownBlocks(source)[0];
+    if (block.kind !== "table") throw new Error("expected table block");
+
+    const edit = deleteMarkdownTableRow(block, { rowKind: "body", rowIndex: 0, cellIndex: 1 });
+
+    expect(edit).not.toBeNull();
+    expect(applyMarkdownEdit(source, edit as NonNullable<typeof edit>)).toBe(
+      "| A | B |\n| --- | --- |\n| z | q |",
+    );
+    expect(edit?.target).toEqual({ rowKind: "body", rowIndex: 0, cellIndex: 1 });
+    expect(deleteMarkdownTableRow(block, { rowKind: "header", rowIndex: 0, cellIndex: 1 })).toBeNull();
+  });
+
+  it("inserts and deletes markdown table columns while preserving cell source", () => {
+    const source = "| **A** | B |\n| :--- | ---: |\n| `x` | y |";
+    const block = parseMarkdownBlocks(source)[0];
+    if (block.kind !== "table") throw new Error("expected table block");
+
+    const inserted = insertMarkdownTableColumn(
+      block,
+      { rowKind: "body", rowIndex: 0, cellIndex: 0 },
+      "after",
+    );
+    const withColumn = applyMarkdownEdit(source, inserted as NonNullable<typeof inserted>);
+    const insertedBlock = parseMarkdownBlocks(withColumn)[0];
+    if (insertedBlock.kind !== "table") throw new Error("expected table block");
+    const deleted = deleteMarkdownTableColumn(insertedBlock, {
+      rowKind: "body",
+      rowIndex: 0,
+      cellIndex: 1,
+    });
+
+    expect(inserted).not.toBeNull();
+    expect(withColumn).toBe("| **A** |  | B |\n| --- | --- | ---: |\n| `x` |  | y |");
+    expect(inserted?.target).toEqual({ rowKind: "body", rowIndex: 0, cellIndex: 1 });
+    expect(deleted).not.toBeNull();
+    expect(applyMarkdownEdit(withColumn, deleted as NonNullable<typeof deleted>)).toBe(
+      "| **A** | B |\n| --- | ---: |\n| `x` | y |",
+    );
+  });
+
+  it("pastes TSV cells into a projected markdown table and appends missing rows", () => {
+    const source = "| A | B | C |\n| --- | --- | --- |\n| x | y | z |";
+    const block = parseMarkdownBlocks(source)[0];
+    if (block.kind !== "table") throw new Error("expected table block");
+
+    const edit = pasteMarkdownTableCells(
+      block,
+      { rowKind: "body", rowIndex: 0, cellIndex: 1 },
+      "b1\tc1\nb2\tc2",
+    );
+
+    expect(edit).not.toBeNull();
+    expect(applyMarkdownEdit(source, edit as NonNullable<typeof edit>)).toBe(
+      "| A | B | C |\n| --- | --- | --- |\n| x | b1 | c1 |\n|  | b2 | c2 |",
+    );
+    expect(edit?.target).toEqual({ rowKind: "body", rowIndex: 1, cellIndex: 2 });
+  });
+
+  it("pastes markdown table cells through the projected table core", () => {
+    const source = "| A | B |\n| --- | --- |\n| x | y |";
+    const block = parseMarkdownBlocks(source)[0];
+    if (block.kind !== "table") throw new Error("expected table block");
+
+    const edit = pasteMarkdownTableCells(
+      block,
+      { rowKind: "header", rowIndex: 0, cellIndex: 0 },
+      "| H1 | H2 |\n| --- | --- |\n| a | b |",
+    );
+
+    expect(edit).not.toBeNull();
+    expect(applyMarkdownEdit(source, edit as NonNullable<typeof edit>)).toBe(
+      "| H1 | H2 |\n| --- | --- |\n| a | b |",
+    );
   });
 
   it("maps block ratio hits by line buckets instead of rounding into the next line", () => {

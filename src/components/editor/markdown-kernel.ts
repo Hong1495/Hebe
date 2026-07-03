@@ -179,9 +179,17 @@ export interface MarkdownTableCellTarget {
 
 export type MarkdownTableNavigationDirection = "next" | "previous" | "up" | "down";
 
+export type MarkdownTableRowPlacement = "before" | "after";
+export type MarkdownTableColumnPlacement = "before" | "after";
+
 export interface MarkdownTableRowInsertEdit {
   change: MarkdownTextChange;
   target: MarkdownTableCellTarget;
+}
+
+export interface MarkdownTableEdit {
+  changes: MarkdownTextChange[];
+  target?: MarkdownTableCellTarget;
 }
 
 interface SourceLine {
@@ -567,6 +575,180 @@ export function appendMarkdownTableRow(
   };
 }
 
+export function insertMarkdownTableRow(
+  block: TableBlock,
+  target: MarkdownTableCellTarget,
+  placement: MarkdownTableRowPlacement,
+): MarkdownTableEdit | null {
+  const columnCount = block.table.headers.length;
+  if (columnCount <= 0) return null;
+
+  const row = formatMarkdownTableRow(Array.from({ length: columnCount }, () => ""));
+  if (target.rowKind === "header") {
+    const delimiter = tableSourceRow(block, "delimiter", 0);
+    if (!delimiter) return null;
+    return {
+      changes: [{ from: delimiter.lineTo, to: delimiter.lineTo, insert: `\n${row}` }],
+      target: { rowKind: "body", rowIndex: 0, cellIndex: clampTableCellIndex(target, columnCount) },
+    };
+  }
+
+  const bodyRow = tableSourceRow(block, "body", target.rowIndex);
+  if (!bodyRow) {
+    const rowInsert = appendMarkdownTableRow(block, target.cellIndex);
+    return rowInsert ? { changes: [rowInsert.change], target: rowInsert.target } : null;
+  }
+
+  if (placement === "before") {
+    return {
+      changes: [{ from: bodyRow.lineFrom, to: bodyRow.lineFrom, insert: `${row}\n` }],
+      target: {
+        rowKind: "body",
+        rowIndex: target.rowIndex,
+        cellIndex: clampTableCellIndex(target, columnCount),
+      },
+    };
+  }
+
+  return {
+    changes: [{ from: bodyRow.lineTo, to: bodyRow.lineTo, insert: `\n${row}` }],
+    target: {
+      rowKind: "body",
+      rowIndex: target.rowIndex + 1,
+      cellIndex: clampTableCellIndex(target, columnCount),
+    },
+  };
+}
+
+export function deleteMarkdownTableRow(
+  block: TableBlock,
+  target: MarkdownTableCellTarget,
+): MarkdownTableEdit | null {
+  if (target.rowKind !== "body") return null;
+
+  const row = tableSourceRow(block, "body", target.rowIndex);
+  if (!row) return null;
+
+  const columnCount = block.table.headers.length;
+  const nextRowIndex = Math.min(target.rowIndex, Math.max(0, block.table.rows.length - 2));
+  const targetAfterDelete =
+    block.table.rows.length > 1
+      ? {
+          rowKind: "body" as const,
+          rowIndex: nextRowIndex,
+          cellIndex: clampTableCellIndex(target, columnCount),
+        }
+      : {
+          rowKind: "header" as const,
+          rowIndex: 0,
+          cellIndex: clampTableCellIndex(target, columnCount),
+        };
+
+  return {
+    changes: [deleteTableSourceRowChange(block, row)],
+    target: targetAfterDelete,
+  };
+}
+
+export function insertMarkdownTableColumn(
+  block: TableBlock,
+  target: MarkdownTableCellTarget,
+  placement: MarkdownTableColumnPlacement,
+): MarkdownTableEdit | null {
+  const columnCount = block.table.headers.length;
+  if (columnCount <= 0) return null;
+
+  const insertIndex = clampTableCellIndex(target, columnCount) + (placement === "after" ? 1 : 0);
+  const table = readMarkdownTableSourceMatrix(block);
+  table.headers.splice(insertIndex, 0, "");
+  table.align.splice(insertIndex, 0, "left");
+  for (const row of table.rows) row.splice(insertIndex, 0, "");
+
+  return {
+    changes: [{ from: block.from, to: block.to, insert: serializeMarkdownTableSource(table) }],
+    target: { rowKind: target.rowKind, rowIndex: target.rowIndex, cellIndex: insertIndex },
+  };
+}
+
+export function deleteMarkdownTableColumn(
+  block: TableBlock,
+  target: MarkdownTableCellTarget,
+): MarkdownTableEdit | null {
+  const columnCount = block.table.headers.length;
+  if (columnCount <= 1) return null;
+
+  const deleteIndex = clampTableCellIndex(target, columnCount);
+  const table = readMarkdownTableSourceMatrix(block);
+  table.headers.splice(deleteIndex, 1);
+  table.align.splice(deleteIndex, 1);
+  for (const row of table.rows) row.splice(deleteIndex, 1);
+
+  return {
+    changes: [{ from: block.from, to: block.to, insert: serializeMarkdownTableSource(table) }],
+    target: {
+      rowKind: target.rowKind,
+      rowIndex: target.rowIndex,
+      cellIndex: Math.min(deleteIndex, columnCount - 2),
+    },
+  };
+}
+
+export function pasteMarkdownTableCells(
+  block: TableBlock,
+  target: MarkdownTableCellTarget,
+  clipboardText: string,
+): MarkdownTableEdit | null {
+  const pastedRows = parseMarkdownTableCellClipboard(clipboardText);
+  if (!pastedRows.length) return null;
+
+  const columnCount = block.table.headers.length;
+  if (columnCount <= 0) return null;
+
+  const changes: MarkdownTextChange[] = [];
+  const appendedRows: string[][] = [];
+  let lastTarget: MarkdownTableCellTarget | null = null;
+
+  pastedRows.forEach((pastedRow, pastedRowIndex) => {
+    const rowTarget = tablePasteRowTarget(target, pastedRowIndex);
+    const rowValues = Array.from({ length: columnCount }, () => "");
+    let rowHasValue = false;
+
+    pastedRow.forEach((value, pastedCellIndex) => {
+      const cellIndex = target.cellIndex + pastedCellIndex;
+      if (cellIndex < 0 || cellIndex >= columnCount) return;
+      rowValues[cellIndex] = value;
+      rowHasValue = true;
+      lastTarget = { ...rowTarget, cellIndex };
+
+      if (rowTarget.rowKind === "body" && rowTarget.rowIndex >= block.table.rows.length) {
+        return;
+      }
+
+      const change = updateMarkdownTableCell(block, { ...rowTarget, cellIndex }, value);
+      if (change) changes.push(change);
+    });
+
+    if (
+      rowHasValue &&
+      rowTarget.rowKind === "body" &&
+      rowTarget.rowIndex >= block.table.rows.length
+    ) {
+      appendedRows.push(rowValues);
+    }
+  });
+
+  if (appendedRows.length > 0) {
+    changes.push({
+      from: block.to,
+      to: block.to,
+      insert: `\n${appendedRows.map(formatMarkdownTableRow).join("\n")}`,
+    });
+  }
+
+  if (!changes.length) return null;
+  return { changes: sortMarkdownTextChanges(changes), target: lastTarget ?? target };
+}
+
 export function scanMarkdownLineDecorations(
   source: string,
   revealLines: ReadonlySet<number> = new Set<number>(),
@@ -756,6 +938,144 @@ function normalizeMarkdownTableCellValue(value: string): string {
 
 function normalizeMarkdownTableCellSource(value: string): string {
   return ` ${normalizeMarkdownTableCellValue(value)} `;
+}
+
+function formatMarkdownTableRow(cells: string[]): string {
+  return `| ${cells.map(normalizeMarkdownTableCellValue).join(" | ")} |`;
+}
+
+function formatMarkdownTableDelimiter(align: TableAlign[]): string {
+  return `| ${align.map(formatMarkdownTableDelimiterCell).join(" | ")} |`;
+}
+
+function formatMarkdownTableDelimiterCell(align: TableAlign): string {
+  if (align === "center") return ":---:";
+  if (align === "right") return "---:";
+  return "---";
+}
+
+function clampTableCellIndex(target: MarkdownTableCellTarget, columnCount: number): number {
+  return clampInt(target.cellIndex, 0, Math.max(0, columnCount - 1));
+}
+
+function tableSourceRow(
+  block: TableBlock,
+  kind: TableSourceRowKind,
+  rowIndex: number,
+): TableSourceRow | null {
+  return block.sourceRows.find((row) => row.kind === kind && row.rowIndex === rowIndex) ?? null;
+}
+
+function deleteTableSourceRowChange(block: TableBlock, row: TableSourceRow): MarkdownTextChange {
+  const relativeTo = row.lineTo - block.from;
+  const after = block.source.slice(relativeTo, relativeTo + 2);
+  if (after.startsWith("\r\n")) {
+    return { from: row.lineFrom, to: row.lineTo + 2, insert: "" };
+  }
+  if (after.startsWith("\n")) {
+    return { from: row.lineFrom, to: row.lineTo + 1, insert: "" };
+  }
+
+  const relativeFrom = row.lineFrom - block.from;
+  const before = block.source.slice(Math.max(0, relativeFrom - 2), relativeFrom);
+  const removeFrom = before.endsWith("\r\n") ? row.lineFrom - 2 : row.lineFrom - 1;
+  return { from: Math.max(block.from, removeFrom), to: row.lineTo, insert: "" };
+}
+
+function readMarkdownTableSourceMatrix(block: TableBlock): {
+  headers: string[];
+  align: TableAlign[];
+  rows: string[][];
+} {
+  const columnCount = block.table.headers.length;
+  return {
+    headers: readMarkdownTableSourceRowCells(block, "header", 0, columnCount),
+    align: Array.from({ length: columnCount }, (_, index) => block.table.align[index] ?? "left"),
+    rows: block.table.rows.map((_, rowIndex) =>
+      readMarkdownTableSourceRowCells(block, "body", rowIndex, columnCount),
+    ),
+  };
+}
+
+function readMarkdownTableSourceRowCells(
+  block: TableBlock,
+  kind: Extract<TableSourceRowKind, "header" | "body">,
+  rowIndex: number,
+  columnCount: number,
+): string[] {
+  const row = tableSourceRow(block, kind, rowIndex);
+  return Array.from({ length: columnCount }, (_, cellIndex) =>
+    row ? readMarkdownTableSourceCell(block, row, cellIndex) : "",
+  );
+}
+
+function readMarkdownTableSourceCell(
+  block: TableBlock,
+  row: TableSourceRow,
+  cellIndex: number,
+): string {
+  const span = row.cells[cellIndex];
+  if (!span) return "";
+  const from = row.lineFrom - block.from + span.contentFrom;
+  const to = row.lineFrom - block.from + span.contentTo;
+  return block.source.slice(from, to);
+}
+
+function serializeMarkdownTableSource(table: {
+  headers: string[];
+  align: TableAlign[];
+  rows: string[][];
+}): string {
+  return [
+    formatMarkdownTableRow(table.headers),
+    formatMarkdownTableDelimiter(table.align),
+    ...table.rows.map(formatMarkdownTableRow),
+  ].join("\n");
+}
+
+function parseMarkdownTableCellClipboard(text: string): string[][] {
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lines = trimTrailingEmptyLines(normalized.split("\n"));
+  if (!lines.length) return [];
+
+  if (lines.some((line) => line.includes("\t"))) {
+    return lines.map((line) => line.split("\t"));
+  }
+
+  if (lines.length >= 2 && isTableRow(lines[0]) && isTableDelimiter(lines[1])) {
+    return [lines[0], ...lines.slice(2).filter(isTableRow)].map((line) =>
+      rawTableCells(line).map((cell) => cell.text.trim()),
+    );
+  }
+
+  if (lines.length > 1 && lines.every(isTableRow)) {
+    return lines.map((line) => rawTableCells(line).map((cell) => cell.text.trim()));
+  }
+
+  return [];
+}
+
+function trimTrailingEmptyLines(lines: string[]): string[] {
+  const trimmed = [...lines];
+  while (trimmed.length > 0 && trimmed[trimmed.length - 1] === "") trimmed.pop();
+  return trimmed;
+}
+
+function tablePasteRowTarget(
+  target: MarkdownTableCellTarget,
+  pastedRowIndex: number,
+): Omit<MarkdownTableCellTarget, "cellIndex"> {
+  if (target.rowKind === "header") {
+    return pastedRowIndex === 0
+      ? { rowKind: "header", rowIndex: 0 }
+      : { rowKind: "body", rowIndex: pastedRowIndex - 1 };
+  }
+
+  return { rowKind: "body", rowIndex: target.rowIndex + pastedRowIndex };
+}
+
+function sortMarkdownTextChanges(changes: MarkdownTextChange[]): MarkdownTextChange[] {
+  return [...changes].sort((a, b) => a.from - b.from || a.to - b.to);
 }
 
 function editableTableRows(
