@@ -4,12 +4,13 @@ import {
   isMarkdownFormatCommand,
   markdownBlockPositionFromHit,
   markdownSourceRangePositionFromRatio,
-  type MarkdownFormatEdit,
+  type MarkdownTextChange,
   pasteMarkdownImage,
   parseImageLine,
   parseMarkdownBlocks,
   scanInlineMarkdownSpans,
   scanMarkdownLineDecorations,
+  updateMarkdownTableCell,
 } from "../src/components/editor/markdown-kernel";
 
 describe("markdown kernel", () => {
@@ -88,6 +89,50 @@ describe("markdown kernel", () => {
 
     expect(bodyCell).toBe(source.indexOf("**y**"));
     expect(secondBodyCell).toBe(source.indexOf("z"));
+  });
+
+  it("creates table cell update edits from the kernel source map", () => {
+    const source = "| A | B |\n| --- | --- |\n| x | y |";
+    const block = parseMarkdownBlocks(source)[0];
+    if (block.kind !== "table") throw new Error("expected table block");
+
+    const change = updateMarkdownTableCell(
+      block,
+      { rowKind: "body", rowIndex: 0, cellIndex: 1 },
+      "z",
+    );
+
+    expect(change).not.toBeNull();
+    expect(applyMarkdownEdit(source, { changes: [change as MarkdownTextChange] })).toBe(
+      "| A | B |\n| --- | --- |\n| x | z |",
+    );
+  });
+
+  it("escapes pipes when updating markdown table cells", () => {
+    const source = "| A | B |\n| --- | --- |\n| x | y |";
+    const block = parseMarkdownBlocks(source)[0];
+    if (block.kind !== "table") throw new Error("expected table block");
+
+    const change = updateMarkdownTableCell(
+      block,
+      { rowKind: "header", rowIndex: 0, cellIndex: 0 },
+      "a|b",
+    );
+
+    expect(change).not.toBeNull();
+    expect(applyMarkdownEdit(source, { changes: [change as MarkdownTextChange] })).toBe(
+      "| a\\|b | B |\n| --- | --- |\n| x | y |",
+    );
+  });
+
+  it("does not create table cell edits for missing cells", () => {
+    const source = "| A | B |\n| --- | --- |\n| x | y |";
+    const block = parseMarkdownBlocks(source)[0];
+    if (block.kind !== "table") throw new Error("expected table block");
+
+    expect(
+      updateMarkdownTableCell(block, { rowKind: "body", rowIndex: 0, cellIndex: 5 }, "z"),
+    ).toBeNull();
   });
 
   it("maps block ratio hits by line buckets instead of rounding into the next line", () => {
@@ -233,7 +278,7 @@ describe("markdown kernel", () => {
   });
 });
 
-function applyMarkdownEdit(source: string, edit: MarkdownFormatEdit): string {
+function applyMarkdownEdit(source: string, edit: { changes: MarkdownTextChange[] }): string {
   return [...edit.changes]
     .sort((a, b) => b.from - a.from)
     .reduce((current, change) => {

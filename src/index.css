@@ -1059,6 +1059,23 @@ input:focus-visible {
   background: var(--md-table-row-bg);
 }
 
+.cm-markdown-table-cell-input {
+  display: block;
+  width: 100%;
+  min-width: 6ch;
+  padding: 0;
+  border: 0;
+  outline: none;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  line-height: inherit;
+}
+
+.cm-markdown-table-cell-input:focus {
+  box-shadow: inset 0 -1px 0 var(--accent);
+}
+
 /* Focus Mode */
 .cm-focus-mode .cm-line {
   opacity: 0.3;

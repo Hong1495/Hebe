@@ -169,6 +169,12 @@ export interface MarkdownImagePasteEdit {
   selection: MarkdownTextSelection;
 }
 
+export interface MarkdownTableCellTarget {
+  rowKind: "header" | "body";
+  rowIndex: number;
+  cellIndex: number;
+}
+
 interface SourceLine {
   number: number;
   from: number;
@@ -480,6 +486,26 @@ export function pasteMarkdownImage(
   };
 }
 
+export function updateMarkdownTableCell(
+  block: TableBlock,
+  target: MarkdownTableCellTarget,
+  value: string,
+): MarkdownTextChange | null {
+  const row = block.sourceRows.find(
+    (sourceRow) => sourceRow.kind === target.rowKind && sourceRow.rowIndex === target.rowIndex,
+  );
+  if (!row) return null;
+
+  const span = row.cells[target.cellIndex];
+  if (!span) return null;
+
+  return {
+    from: row.lineFrom + span.contentFrom,
+    to: row.lineFrom + span.contentTo,
+    insert: normalizeMarkdownTableCellValue(value),
+  };
+}
+
 export function scanMarkdownLineDecorations(
   source: string,
   revealLines: ReadonlySet<number> = new Set<number>(),
@@ -661,6 +687,10 @@ function stripCommonLinePrefix(line: string): string {
     .replace(/^(\s{0,3})[-+*]\s+\[[ xX]\]\s+/, "$1")
     .replace(/^(\s{0,3})(?:[-+*]|\d+[.)])\s+/, "$1")
     .replace(/^(\s{0,3})>\s?/, "$1");
+}
+
+function normalizeMarkdownTableCellValue(value: string): string {
+  return value.replace(/\r?\n/g, " ").trim().replace(/\|/g, "\\|");
 }
 
 function readFencedCodeBlock(

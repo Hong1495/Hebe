@@ -8,10 +8,12 @@ import katex from "katex";
 import { isTauriRuntime } from "../../../lib/ipc";
 import { dirname } from "../../../lib/path";
 import {
+  type MarkdownTableCellTarget,
   markdownBlockPositionFromHit,
   markdownSourceRangePositionFromRatio,
   parseMarkdownBlocks,
   type TableBlock,
+  updateMarkdownTableCell,
 } from "../markdown-kernel";
 import {
   editorFocusedField,
@@ -302,19 +304,27 @@ class TableWidget extends WidgetType {
   toDOM(view: EditorView): HTMLElement {
     const wrapper = document.createElement("div");
     wrapper.className = "cm-markdown-table-wrap";
-    makeTableWidgetEditable(wrapper, view, this.block);
+    wrapper.classList.add("cm-editable-widget");
 
     const table = document.createElement("table");
     table.className = "cm-markdown-table";
 
     const thead = document.createElement("thead");
     const headerRow = document.createElement("tr");
-    headerRow.dataset.tableRowKind = "header";
-    headerRow.dataset.tableRowIndex = "0";
     this.block.table.headers.forEach((cell, index) => {
       const th = document.createElement("th");
-      th.textContent = cell;
       th.style.textAlign = this.block.table.align[index] ?? "left";
+      makeTableCellInput(
+        th,
+        view,
+        this.block,
+        {
+          rowKind: "header",
+          rowIndex: 0,
+          cellIndex: index,
+        },
+        cell,
+      );
       headerRow.appendChild(th);
     });
     thead.appendChild(headerRow);
@@ -323,12 +333,20 @@ class TableWidget extends WidgetType {
     const tbody = document.createElement("tbody");
     this.block.table.rows.forEach((row, rowIndex) => {
       const tr = document.createElement("tr");
-      tr.dataset.tableRowKind = "body";
-      tr.dataset.tableRowIndex = String(rowIndex);
       this.block.table.headers.forEach((_, index) => {
         const td = document.createElement("td");
-        td.textContent = row[index] ?? "";
         td.style.textAlign = this.block.table.align[index] ?? "left";
+        makeTableCellInput(
+          td,
+          view,
+          this.block,
+          {
+            rowKind: "body",
+            rowIndex,
+            cellIndex: index,
+          },
+          row[index] ?? "",
+        );
         tr.appendChild(td);
       });
       tbody.appendChild(tr);
@@ -342,6 +360,69 @@ class TableWidget extends WidgetType {
   ignoreEvent(): boolean {
     return false;
   }
+}
+
+function makeTableCellInput(
+  cell: HTMLTableCellElement,
+  view: EditorView,
+  block: TableBlock,
+  target: MarkdownTableCellTarget,
+  value: string,
+): void {
+  const input = document.createElement("input");
+  input.className = "cm-markdown-table-cell-input";
+  input.type = "text";
+  input.value = value;
+  input.spellcheck = true;
+
+  const stop = (event: Event) => event.stopPropagation();
+  input.addEventListener("mousedown", stop);
+  input.addEventListener("click", stop);
+  input.addEventListener("input", stop);
+  input.addEventListener("focus", () => {
+    const pos = markdownBlockPositionFromHit(view.state.doc.toString(), block, {
+      kind: "tableCell",
+      rowKind: target.rowKind,
+      rowIndex: target.rowIndex,
+      cellIndex: target.cellIndex,
+      xRatio: 0,
+    });
+    view.dispatch({
+      selection: { anchor: pos, head: pos },
+      effects: setPreviewRevealRange.of(null),
+    });
+  });
+
+  let committedValue = value;
+  const commit = () => {
+    if (input.value === committedValue) return;
+    const change = updateMarkdownTableCell(block, target, input.value);
+    if (!change) return;
+    committedValue = input.value;
+    view.dispatch({
+      changes: change,
+      selection: { anchor: change.from + change.insert.length },
+      effects: setPreviewRevealRange.of(null),
+    });
+  };
+
+  input.addEventListener("blur", commit);
+  input.addEventListener("change", commit);
+  input.addEventListener("keydown", (event) => {
+    event.stopPropagation();
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commit();
+      input.blur();
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      input.value = value;
+      input.blur();
+    }
+  });
+
+  cell.appendChild(input);
 }
 
 function makeEditableWidget(
@@ -387,57 +468,6 @@ function blockClickPosition(
   });
 }
 
-function makeTableWidgetEditable(element: HTMLElement, view: EditorView, block: TableBlock): void {
-  element.classList.add("cm-editable-widget");
-  element.tabIndex = 0;
-
-  const reveal = (event: Event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const pos =
-      event instanceof MouseEvent
-        ? tableClickPosition(event, element, view, block)
-        : Math.min(block.from, view.state.doc.length);
-    view.dispatch({
-      selection: { anchor: pos, head: pos },
-      effects: setPreviewRevealRange.of({ from: block.from, to: block.to }),
-      scrollIntoView: true,
-    });
-    view.focus();
-  };
-
-  element.addEventListener("mousedown", reveal);
-  element.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" || event.key === " ") reveal(event);
-  });
-}
-
-function tableClickPosition(
-  event: MouseEvent,
-  wrapper: HTMLElement,
-  view: EditorView,
-  block: TableBlock,
-): number {
-  const target = event.target instanceof Element ? event.target : null;
-  const cell = target?.closest("th,td") as HTMLTableCellElement | null;
-  if (!cell || !wrapper.contains(cell)) {
-    return blockClickPosition(event, wrapper, view, block.from, block.to);
-  }
-
-  const row = cell.closest("tr");
-  if (!row) return Math.min(block.from, view.state.doc.length);
-
-  const rect = cell.getBoundingClientRect();
-  const rowIndex = Number.parseInt(row.dataset.tableRowIndex ?? "0", 10);
-  return markdownBlockPositionFromHit(view.state.doc.toString(), block, {
-    kind: "tableCell",
-    rowKind: row.dataset.tableRowKind === "body" ? "body" : "header",
-    rowIndex: Number.isFinite(rowIndex) ? rowIndex : 0,
-    cellIndex: cell.cellIndex,
-    xRatio: rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0,
-  });
-}
-
 function createFallbackText(message: string): HTMLElement {
   const span = document.createElement("span");
   span.style.color = "var(--text-secondary)";
@@ -463,7 +493,9 @@ function blockDecorations(state: EditorState, mdPath: string | null): Decoration
   for (const block of parseMarkdownBlocks(state.doc.toString())) {
     const revealFrom = block.kind === "inlineMath" ? block.lineFrom : block.from;
     const revealTo = block.kind === "inlineMath" ? block.lineTo : block.to;
-    if (rangeIsRevealed(state, revealRange, revealFrom, revealTo)) continue;
+    if (block.kind !== "table" && rangeIsRevealed(state, revealRange, revealFrom, revealTo)) {
+      continue;
+    }
 
     switch (block.kind) {
       case "fencedCode":
