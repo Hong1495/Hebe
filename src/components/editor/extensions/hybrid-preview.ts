@@ -3,6 +3,7 @@ import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemir
 import {
   type InlineSpanKind,
   type MarkdownLineReplacement,
+  pasteMarkdownImage,
   scanMarkdownLineDecorations,
 } from "../markdown-kernel";
 
@@ -265,10 +266,15 @@ export const pasteImagePlugin = (mdPath: string | null) =>
               const { pasteImage } = await import("../../../lib/ipc");
               const relPath = await pasteImage(data, mdPath);
               const imageMarkdown = `![](${relPath})`;
-              const paste = imagePasteTransaction(view.state, imageMarkdown);
+              const selection = view.state.selection.main;
+              const paste = pasteMarkdownImage(
+                view.state.doc.toString(),
+                { from: selection.from, to: selection.to },
+                imageMarkdown,
+              );
               view.dispatch({
-                changes: paste.changes,
-                selection: { anchor: paste.selectionAnchor },
+                changes: paste.changes[0],
+                selection: { anchor: paste.selection.from },
                 effects: setPreviewRevealRange.of(null),
                 scrollIntoView: true,
               });
@@ -283,27 +289,6 @@ export const pasteImagePlugin = (mdPath: string | null) =>
       return false;
     },
   });
-
-function imagePasteTransaction(
-  state: EditorState,
-  imageMarkdown: string,
-): { changes: { from: number; to: number; insert: string }; selectionAnchor: number } {
-  const selection = state.selection.main;
-  const startLine = state.doc.lineAt(selection.from);
-  const before = state.doc.sliceString(startLine.from, selection.from);
-  const prefix = before.trim().length > 0 ? "\n" : "";
-  const suffix = "\n";
-  const insert = `${prefix}${imageMarkdown}${suffix}`;
-
-  return {
-    changes: {
-      from: selection.from,
-      to: selection.to,
-      insert,
-    },
-    selectionAnchor: selection.from + insert.length,
-  };
-}
 
 export const inlinePreviewPlugin = StateField.define<DecorationSet>({
   create(state) {

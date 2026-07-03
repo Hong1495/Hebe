@@ -133,6 +133,42 @@ export type MarkdownBlockHit =
       xRatio: number;
     };
 
+export type MarkdownFormatCommand =
+  | "format-bold"
+  | "format-italic"
+  | "format-strike"
+  | "format-inline-code"
+  | "format-link"
+  | "format-heading-1"
+  | "format-heading-2"
+  | "format-heading-3"
+  | "format-bullet-list"
+  | "format-ordered-list"
+  | "format-task-list"
+  | "format-quote"
+  | "format-code-fence";
+
+export interface MarkdownTextSelection {
+  from: number;
+  to: number;
+}
+
+export interface MarkdownTextChange {
+  from: number;
+  to: number;
+  insert: string;
+}
+
+export interface MarkdownFormatEdit {
+  changes: MarkdownTextChange[];
+  selection?: MarkdownTextSelection;
+}
+
+export interface MarkdownImagePasteEdit {
+  changes: [MarkdownTextChange];
+  selection: MarkdownTextSelection;
+}
+
 interface SourceLine {
   number: number;
   from: number;
@@ -143,6 +179,25 @@ interface SourceLine {
 const MAX_BLOCK_SCAN_LINES = 500;
 const MAX_INLINE_SCAN_LENGTH = 6000;
 const MAX_INLINE_MATH_SCAN_LENGTH = 6000;
+const MARKDOWN_FORMAT_COMMANDS = new Set<string>([
+  "format-bold",
+  "format-italic",
+  "format-strike",
+  "format-inline-code",
+  "format-link",
+  "format-heading-1",
+  "format-heading-2",
+  "format-heading-3",
+  "format-bullet-list",
+  "format-ordered-list",
+  "format-task-list",
+  "format-quote",
+  "format-code-fence",
+]);
+
+export function isMarkdownFormatCommand(action: string): action is MarkdownFormatCommand {
+  return MARKDOWN_FORMAT_COMMANDS.has(action);
+}
 
 export function readFenceOpener(text: string): FenceMarker | null {
   const match = text.match(/^[ \t]{0,3}(`{3,}|~{3,})(.*)$/);
@@ -364,6 +419,67 @@ export function markdownSourceRangePositionFromRatio(
   return lineFrom + Math.round(xRatio * Math.max(0, lineTo - lineFrom));
 }
 
+export function formatMarkdownSelection(
+  source: string,
+  selection: MarkdownTextSelection,
+  command: MarkdownFormatCommand,
+): MarkdownFormatEdit {
+  const normalizedSelection = normalizeSelection(source, selection);
+
+  switch (command) {
+    case "format-bold":
+      return wrapMarkdownSelection(source, normalizedSelection, "**", "**", "bold");
+    case "format-italic":
+      return wrapMarkdownSelection(source, normalizedSelection, "*", "*", "italic");
+    case "format-strike":
+      return wrapMarkdownSelection(source, normalizedSelection, "~~", "~~", "strikethrough");
+    case "format-inline-code":
+      return wrapMarkdownSelection(source, normalizedSelection, "`", "`", "code");
+    case "format-link":
+      return insertMarkdownLink(source, normalizedSelection);
+    case "format-heading-1":
+      return setMarkdownHeading(source, normalizedSelection, 1);
+    case "format-heading-2":
+      return setMarkdownHeading(source, normalizedSelection, 2);
+    case "format-heading-3":
+      return setMarkdownHeading(source, normalizedSelection, 3);
+    case "format-bullet-list":
+      return prefixMarkdownLines(source, normalizedSelection, () => "- ");
+    case "format-ordered-list":
+      return prefixMarkdownLines(source, normalizedSelection, (_line, index) => `${index + 1}. `);
+    case "format-task-list":
+      return prefixMarkdownLines(source, normalizedSelection, () => "- [ ] ");
+    case "format-quote":
+      return prefixMarkdownLines(source, normalizedSelection, () => "> ");
+    case "format-code-fence":
+      return wrapMarkdownBlock(source, normalizedSelection, "```\n", "\n```", "");
+  }
+}
+
+export function pasteMarkdownImage(
+  source: string,
+  selection: MarkdownTextSelection,
+  imageMarkdown: string,
+): MarkdownImagePasteEdit {
+  const normalizedSelection = normalizeSelection(source, selection);
+  const startLine = sourceLineAt(source, normalizedSelection.from);
+  const before = source.slice(startLine.from, normalizedSelection.from);
+  const prefix = before.trim().length > 0 ? "\n" : "";
+  const insert = `${prefix}${imageMarkdown}\n`;
+  const anchor = normalizedSelection.from + insert.length;
+
+  return {
+    changes: [
+      {
+        from: normalizedSelection.from,
+        to: normalizedSelection.to,
+        insert,
+      },
+    ],
+    selection: { from: anchor, to: anchor },
+  };
+}
+
 export function scanMarkdownLineDecorations(
   source: string,
   revealLines: ReadonlySet<number> = new Set<number>(),
@@ -418,6 +534,133 @@ function splitSourceLines(source: string): SourceLine[] {
   }
 
   return lines;
+}
+
+function normalizeSelection(
+  source: string,
+  selection: MarkdownTextSelection,
+): MarkdownTextSelection {
+  const from = clampInt(Math.min(selection.from, selection.to), 0, source.length);
+  const to = clampInt(Math.max(selection.from, selection.to), 0, source.length);
+  return { from, to };
+}
+
+function sourceLineAt(source: string, position: number): SourceLine {
+  const lines = splitSourceLines(source);
+  return sourceLineAtFromLines(lines, source.length, position);
+}
+
+function sourceLineAtFromLines(
+  lines: SourceLine[],
+  sourceLength: number,
+  position: number,
+): SourceLine {
+  const pos = clampInt(position, 0, sourceLength);
+  return (
+    lines.find((line) => line.from <= pos && pos <= line.to) ??
+    lines.find((line) => line.from <= pos && pos < line.to + 1) ??
+    lines[lines.length - 1]
+  );
+}
+
+function sourceLineByNumber(lines: SourceLine[], lineNumber: number): SourceLine {
+  return lines[clampInt(lineNumber, 1, lines.length) - 1];
+}
+
+function wrapMarkdownSelection(
+  source: string,
+  selection: MarkdownTextSelection,
+  before: string,
+  after: string,
+  placeholder: string,
+): MarkdownFormatEdit {
+  const selected = source.slice(selection.from, selection.to);
+  const inner = selected || placeholder;
+  const insert = `${before}${inner}${after}`;
+  const anchor = selection.from + before.length;
+
+  return {
+    changes: [{ from: selection.from, to: selection.to, insert }],
+    selection: { from: anchor, to: anchor + inner.length },
+  };
+}
+
+function insertMarkdownLink(source: string, selection: MarkdownTextSelection): MarkdownFormatEdit {
+  const selected = source.slice(selection.from, selection.to) || "link";
+  const insert = `[${selected}](url)`;
+  const urlFrom = selection.from + selected.length + 3;
+
+  return {
+    changes: [{ from: selection.from, to: selection.to, insert }],
+    selection: { from: urlFrom, to: urlFrom + 3 },
+  };
+}
+
+function setMarkdownHeading(
+  source: string,
+  selection: MarkdownTextSelection,
+  level: 1 | 2 | 3,
+): MarkdownFormatEdit {
+  const line = sourceLineAt(source, selection.from);
+  const stripped = line.text.replace(/^\s{0,3}#{1,6}[ \t]+/, "").trimStart();
+  const prefix = `${"#".repeat(level)} `;
+
+  return {
+    changes: [{ from: line.from, to: line.to, insert: `${prefix}${stripped}` }],
+    selection: {
+      from: line.from + prefix.length + stripped.length,
+      to: line.from + prefix.length + stripped.length,
+    },
+  };
+}
+
+function prefixMarkdownLines(
+  source: string,
+  selection: MarkdownTextSelection,
+  prefixForLine: (lineText: string, index: number) => string,
+): MarkdownFormatEdit {
+  const lines = splitSourceLines(source);
+  const startLine = sourceLineAtFromLines(lines, source.length, selection.from);
+  const endLine = sourceLineAtFromLines(lines, source.length, selection.to);
+  const changes: MarkdownTextChange[] = [];
+
+  for (let lineNo = startLine.number; lineNo <= endLine.number; lineNo++) {
+    const line = sourceLineByNumber(lines, lineNo);
+    const stripped = stripCommonLinePrefix(line.text);
+    changes.push({
+      from: line.from,
+      to: line.to,
+      insert: `${prefixForLine(stripped, lineNo - startLine.number)}${stripped}`,
+    });
+  }
+
+  return { changes };
+}
+
+function wrapMarkdownBlock(
+  source: string,
+  selection: MarkdownTextSelection,
+  before: string,
+  after: string,
+  placeholder: string,
+): MarkdownFormatEdit {
+  const startLine = sourceLineAt(source, selection.from);
+  const endLine = sourceLineAt(source, selection.to);
+  const selected = source.slice(startLine.from, endLine.to) || placeholder;
+  const insert = `${before}${selected}${after}`;
+  const anchor = startLine.from + before.length;
+
+  return {
+    changes: [{ from: startLine.from, to: endLine.to, insert }],
+    selection: { from: anchor, to: anchor + selected.length },
+  };
+}
+
+function stripCommonLinePrefix(line: string): string {
+  return line
+    .replace(/^(\s{0,3})[-+*]\s+\[[ xX]\]\s+/, "$1")
+    .replace(/^(\s{0,3})(?:[-+*]|\d+[.)])\s+/, "$1")
+    .replace(/^(\s{0,3})>\s?/, "$1");
 }
 
 function readFencedCodeBlock(

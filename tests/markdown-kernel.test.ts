@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatMarkdownSelection,
+  isMarkdownFormatCommand,
   markdownBlockPositionFromHit,
   markdownSourceRangePositionFromRatio,
+  type MarkdownFormatEdit,
+  pasteMarkdownImage,
   parseImageLine,
   parseMarkdownBlocks,
   scanInlineMarkdownSpans,
@@ -170,4 +174,69 @@ describe("markdown kernel", () => {
       endLine: 3,
     });
   });
+
+  it("creates inline markdown format edits", () => {
+    const edit = formatMarkdownSelection("hello", { from: 0, to: 5 }, "format-bold");
+
+    expect(applyMarkdownEdit("hello", edit)).toBe("**hello**");
+    expect(edit.selection).toEqual({ from: 2, to: 7 });
+  });
+
+  it("creates markdown link edits with the url selected", () => {
+    const edit = formatMarkdownSelection("OpenAI", { from: 0, to: 6 }, "format-link");
+
+    expect(applyMarkdownEdit("OpenAI", edit)).toBe("[OpenAI](url)");
+    expect(edit.selection).toEqual({ from: 9, to: 12 });
+  });
+
+  it("creates heading edits from the current line", () => {
+    const source = "Intro\n  ## Old title";
+    const edit = formatMarkdownSelection(source, { from: source.length, to: source.length }, "format-heading-1");
+
+    expect(applyMarkdownEdit(source, edit)).toBe("Intro\n# Old title");
+    expect(edit.selection).toEqual({ from: "Intro\n# Old title".length, to: "Intro\n# Old title".length });
+  });
+
+  it("creates line prefix edits while stripping existing list markers", () => {
+    const source = "- one\n2. two\n> three";
+    const edit = formatMarkdownSelection(source, { from: 0, to: source.length }, "format-task-list");
+
+    expect(applyMarkdownEdit(source, edit)).toBe("- [ ] one\n- [ ] two\n- [ ] three");
+    expect(edit.selection).toBeUndefined();
+  });
+
+  it("creates block wrapper edits across full selected lines", () => {
+    const source = "before\nalpha\nbeta\nafter";
+    const edit = formatMarkdownSelection(source, { from: 8, to: 15 }, "format-code-fence");
+
+    expect(applyMarkdownEdit(source, edit)).toBe("before\n```\nalpha\nbeta\n```\nafter");
+    expect(edit.selection).toEqual({ from: 11, to: 21 });
+  });
+
+  it("recognizes markdown format commands in the kernel", () => {
+    expect(isMarkdownFormatCommand("format-bold")).toBe(true);
+    expect(isMarkdownFormatCommand("unknown")).toBe(false);
+  });
+
+  it("creates image paste edits on a blank line", () => {
+    const edit = pasteMarkdownImage("", { from: 0, to: 0 }, "![](assets/image.png)");
+
+    expect(applyMarkdownEdit("", edit)).toBe("![](assets/image.png)\n");
+    expect(edit.selection).toEqual({ from: "![](assets/image.png)\n".length, to: "![](assets/image.png)\n".length });
+  });
+
+  it("creates image paste edits on a non-empty line with a leading break", () => {
+    const source = "before";
+    const edit = pasteMarkdownImage(source, { from: source.length, to: source.length }, "![](assets/image.png)");
+
+    expect(applyMarkdownEdit(source, edit)).toBe("before\n![](assets/image.png)\n");
+  });
 });
+
+function applyMarkdownEdit(source: string, edit: MarkdownFormatEdit): string {
+  return [...edit.changes]
+    .sort((a, b) => b.from - a.from)
+    .reduce((current, change) => {
+      return `${current.slice(0, change.from)}${change.insert}${current.slice(change.to)}`;
+    }, source);
+}
