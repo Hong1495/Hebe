@@ -48,18 +48,24 @@ class MathWidget extends WidgetType {
   readonly displayMode: boolean;
   private readonly revealFrom: number | null;
   private readonly revealTo: number | null;
+  private readonly cursorFrom: number | null;
+  private readonly cursorTo: number | null;
 
   constructor(
     latex: string,
     displayMode: boolean,
     revealFrom: number | null = null,
     revealTo: number | null = null,
+    cursorFrom: number | null = null,
+    cursorTo: number | null = null,
   ) {
     super();
     this.latex = latex;
     this.displayMode = displayMode;
     this.revealFrom = revealFrom;
     this.revealTo = revealTo;
+    this.cursorFrom = cursorFrom;
+    this.cursorTo = cursorTo;
   }
 
   override eq(other: MathWidget): boolean {
@@ -67,7 +73,9 @@ class MathWidget extends WidgetType {
       other.latex === this.latex &&
       other.displayMode === this.displayMode &&
       other.revealFrom === this.revealFrom &&
-      other.revealTo === this.revealTo
+      other.revealTo === this.revealTo &&
+      other.cursorFrom === this.cursorFrom &&
+      other.cursorTo === this.cursorTo
     );
   }
 
@@ -75,7 +83,10 @@ class MathWidget extends WidgetType {
     const span = document.createElement("span");
     span.className = this.displayMode ? "cm-math-block" : "cm-math-inline";
     if (this.revealFrom !== null) {
-      makeEditableWidget(span, view, this.revealFrom, this.revealTo ?? this.revealFrom);
+      makeEditableWidget(span, view, this.revealFrom, this.revealTo ?? this.revealFrom, {
+        cursorFrom: this.cursorFrom ?? this.revealFrom,
+        cursorTo: this.cursorTo ?? this.revealTo ?? this.revealFrom,
+      });
     }
     try {
       katex.render(this.latex, span, {
@@ -99,27 +110,42 @@ class MermaidWidget extends WidgetType {
   private id: string;
   private readonly revealFrom: number;
   private readonly revealTo: number;
+  private readonly cursorFrom: number;
+  private readonly cursorTo: number;
 
-  constructor(code: string, revealFrom: number, revealTo: number) {
+  constructor(
+    code: string,
+    revealFrom: number,
+    revealTo: number,
+    cursorFrom: number,
+    cursorTo: number,
+  ) {
     super();
     this.code = code;
     this.id = `mermaid-${(widgetIdCounter++).toString(36)}`;
     this.revealFrom = revealFrom;
     this.revealTo = revealTo;
+    this.cursorFrom = cursorFrom;
+    this.cursorTo = cursorTo;
   }
 
   override eq(other: MermaidWidget): boolean {
     return (
       other.code === this.code &&
       other.revealFrom === this.revealFrom &&
-      other.revealTo === this.revealTo
+      other.revealTo === this.revealTo &&
+      other.cursorFrom === this.cursorFrom &&
+      other.cursorTo === this.cursorTo
     );
   }
 
   toDOM(view: EditorView): HTMLElement {
     const container = document.createElement("div");
     container.className = "cm-mermaid-container";
-    makeEditableWidget(container, view, this.revealFrom, this.revealTo);
+    makeEditableWidget(container, view, this.revealFrom, this.revealTo, {
+      cursorFrom: this.cursorFrom,
+      cursorTo: this.cursorTo,
+    });
 
     const fallback = document.createElement("pre");
     fallback.className = "cm-mermaid-code";
@@ -159,13 +185,24 @@ class CodeBlockWidget extends WidgetType {
   private readonly language: string | null;
   private readonly revealFrom: number;
   private readonly revealTo: number;
+  private readonly cursorFrom: number;
+  private readonly cursorTo: number;
 
-  constructor(code: string, language: string | null, revealFrom: number, revealTo: number) {
+  constructor(
+    code: string,
+    language: string | null,
+    revealFrom: number,
+    revealTo: number,
+    cursorFrom: number,
+    cursorTo: number,
+  ) {
     super();
     this.code = code;
     this.language = language;
     this.revealFrom = revealFrom;
     this.revealTo = revealTo;
+    this.cursorFrom = cursorFrom;
+    this.cursorTo = cursorTo;
   }
 
   override eq(other: CodeBlockWidget): boolean {
@@ -173,7 +210,9 @@ class CodeBlockWidget extends WidgetType {
       other.code === this.code &&
       other.language === this.language &&
       other.revealFrom === this.revealFrom &&
-      other.revealTo === this.revealTo
+      other.revealTo === this.revealTo &&
+      other.cursorFrom === this.cursorFrom &&
+      other.cursorTo === this.cursorTo
     );
   }
 
@@ -181,11 +220,16 @@ class CodeBlockWidget extends WidgetType {
     const pre = document.createElement("pre");
     pre.className = "cm-code-block-widget";
     if (this.language) pre.dataset.language = this.language;
-    makeEditableWidget(pre, view, this.revealFrom, this.revealTo);
 
     const code = document.createElement("code");
     code.textContent = this.code;
     pre.appendChild(code);
+    makeEditableWidget(pre, view, this.revealFrom, this.revealTo, {
+      cursorFrom: this.cursorFrom,
+      cursorTo: this.cursorTo,
+      positionFromEvent: (event) =>
+        codeBlockPositionFromEvent(event, code, this.cursorFrom, this.cursorTo),
+    });
 
     if (this.language) {
       void highlightCodeElement(code, this.code, this.language);
@@ -425,21 +469,31 @@ function makeTableCellInput(
   cell.appendChild(input);
 }
 
+interface EditableWidgetOptions {
+  cursorFrom?: number;
+  cursorTo?: number;
+  positionFromEvent?: (event: MouseEvent) => number | null;
+}
+
 function makeEditableWidget(
   element: HTMLElement,
   view: EditorView,
   from: number,
   to: number,
+  options: EditableWidgetOptions = {},
 ): void {
   element.classList.add("cm-editable-widget");
   element.tabIndex = 0;
+  const cursorFrom = options.cursorFrom ?? from;
+  const cursorTo = options.cursorTo ?? to;
   const reveal = (event: Event) => {
     event.preventDefault();
     event.stopPropagation();
     const pos =
       event instanceof MouseEvent
-        ? blockClickPosition(event, element, view, from, to)
-        : Math.min(from, view.state.doc.length);
+        ? (options.positionFromEvent?.(event) ??
+          blockClickPosition(event, element, view, cursorFrom, cursorTo))
+        : Math.min(cursorFrom, view.state.doc.length);
     view.dispatch({
       selection: { anchor: pos, head: pos },
       effects: setPreviewRevealRange.of({ from, to }),
@@ -466,6 +520,123 @@ function blockClickPosition(
     xRatio: rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0,
     yRatio: rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0,
   });
+}
+
+function codeBlockPositionFromEvent(
+  event: MouseEvent,
+  codeElement: HTMLElement,
+  contentFrom: number,
+  contentTo: number,
+): number | null {
+  const caret = caretFromPoint(event.clientX, event.clientY);
+  if (caret && codeElement.contains(caret.node)) {
+    const offset = textOffsetWithin(codeElement, caret.node, caret.offset);
+    if (offset !== null) return clampInt(contentFrom + offset, contentFrom, contentTo);
+  }
+
+  const text = codeElement.textContent ?? "";
+  if (!text) return contentFrom;
+
+  const lineHit = codeLinePositionFromPoint(event, codeElement, text);
+  if (lineHit !== null) return clampInt(contentFrom + lineHit, contentFrom, contentTo);
+
+  return null;
+}
+
+function caretFromPoint(clientX: number, clientY: number): { node: Node; offset: number } | null {
+  const doc = document as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+
+  try {
+    const caret = doc.caretPositionFromPoint?.(clientX, clientY);
+    if (caret) return { node: caret.offsetNode, offset: caret.offset };
+  } catch {
+    // Fall through to the WebKit range API.
+  }
+
+  try {
+    const range = doc.caretRangeFromPoint?.(clientX, clientY);
+    if (range) return { node: range.startContainer, offset: range.startOffset };
+  } catch {
+    // Fall back to ratio based line mapping.
+  }
+
+  return null;
+}
+
+function textOffsetWithin(root: Node, target: Node, targetOffset: number): number | null {
+  let offset = 0;
+  let found = false;
+
+  const walk = (node: Node): void => {
+    if (found) return;
+    if (node === target) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        offset += Math.min(targetOffset, node.textContent?.length ?? 0);
+      } else {
+        const children = Array.from(node.childNodes).slice(0, targetOffset);
+        offset += children.reduce((sum, child) => sum + (child.textContent?.length ?? 0), 0);
+      }
+      found = true;
+      return;
+    }
+    if (node.nodeType === Node.TEXT_NODE) {
+      offset += node.textContent?.length ?? 0;
+      return;
+    }
+    for (const child of Array.from(node.childNodes)) walk(child);
+  };
+
+  walk(root);
+  return found ? offset : null;
+}
+
+function codeLinePositionFromPoint(
+  event: MouseEvent,
+  codeElement: HTMLElement,
+  source: string,
+): number | null {
+  const lineRanges = codeTextLineRanges(source);
+  if (!lineRanges.length) return 0;
+
+  const rect = codeElement.getBoundingClientRect();
+  const yRatio = rect.height > 0 ? clamp((event.clientY - rect.top) / rect.height, 0, 1) : 0;
+  const lineIndex = Math.min(lineRanges.length - 1, Math.floor(yRatio * lineRanges.length));
+  const line = lineRanges[lineIndex];
+  const xRatio = rect.width > 0 ? clamp((event.clientX - rect.left) / rect.width, 0, 1) : 0;
+  return line.from + Math.round(xRatio * Math.max(0, line.to - line.from));
+}
+
+function codeTextLineRanges(source: string): Array<{ from: number; to: number }> {
+  if (!source) return [{ from: 0, to: 0 }];
+  const lines: Array<{ from: number; to: number }> = [];
+  let from = 0;
+
+  while (from <= source.length) {
+    const newline = source.indexOf("\n", from);
+    if (newline < 0) {
+      lines.push({ from, to: source.length });
+      break;
+    }
+    lines.push({ from, to: newline });
+    from = newline + 1;
+    if (from === source.length) {
+      lines.push({ from, to: from });
+      break;
+    }
+  }
+
+  return lines;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function clampInt(value: number, min: number, max: number): number {
+  return Math.round(clamp(value, min, max));
 }
 
 function createFallbackText(message: string): HTMLElement {
@@ -504,8 +675,21 @@ function blockDecorations(state: EditorState, mdPath: string | null): Decoration
           to: block.to,
           widget: Decoration.replace({
             widget: block.isMermaid
-              ? new MermaidWidget(block.content, block.from, block.to)
-              : new CodeBlockWidget(block.content, block.language, block.from, block.to),
+              ? new MermaidWidget(
+                  block.content,
+                  block.from,
+                  block.to,
+                  block.contentFrom,
+                  block.contentTo,
+                )
+              : new CodeBlockWidget(
+                  block.content,
+                  block.language,
+                  block.from,
+                  block.to,
+                  block.contentFrom,
+                  block.contentTo,
+                ),
             block: true,
           }),
         });
@@ -516,7 +700,14 @@ function blockDecorations(state: EditorState, mdPath: string | null): Decoration
           from: block.from,
           to: block.to,
           widget: Decoration.replace({
-            widget: new MathWidget(block.content, true, block.from, block.to),
+            widget: new MathWidget(
+              block.content,
+              true,
+              block.from,
+              block.to,
+              block.contentFrom,
+              block.contentTo,
+            ),
             block: true,
           }),
         });
@@ -554,7 +745,14 @@ function blockDecorations(state: EditorState, mdPath: string | null): Decoration
           from: block.from,
           to: block.to,
           widget: Decoration.replace({
-            widget: new MathWidget(block.latex, false, block.from, block.to),
+            widget: new MathWidget(
+              block.latex,
+              false,
+              block.from,
+              block.to,
+              block.contentFrom,
+              block.contentTo,
+            ),
           }),
         });
         break;

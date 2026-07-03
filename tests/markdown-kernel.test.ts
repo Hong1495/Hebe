@@ -152,6 +152,28 @@ describe("markdown kernel", () => {
     expect(secondLine).toBe(source.indexOf("const a"));
   });
 
+  it("maps fenced block content ranges without targeting fence lines", () => {
+    const source = "```js\nalpha();\nbeta();\n```";
+    const block = parseMarkdownBlocks(source)[0];
+    if (block.kind !== "fencedCode") throw new Error("expected fenced code block");
+
+    const firstContentLine = markdownSourceRangePositionFromRatio(
+      source,
+      block.contentFrom,
+      block.contentTo,
+      { xRatio: 0, yRatio: 0 },
+    );
+    const lastContentLine = markdownSourceRangePositionFromRatio(
+      source,
+      block.contentFrom,
+      block.contentTo,
+      { xRatio: 0, yRatio: 0.99 },
+    );
+
+    expect(firstContentLine).toBe(source.indexOf("alpha"));
+    expect(lastContentLine).toBe(source.indexOf("beta"));
+  });
+
   it("parses standalone image lines with markdown path forms", () => {
     expect(parseImageLine("![](assets/image-1.png)")).toEqual({
       alt: "",
