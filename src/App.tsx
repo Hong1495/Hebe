@@ -8,6 +8,7 @@ import { OutlinePanel } from "./components/layout/OutlinePanel";
 import { SettingsDialog } from "./components/layout/SettingsPanel";
 import { StatusBar } from "./components/layout/StatusBar";
 import { TabBar } from "./components/layout/TabBar";
+import { closeTabWithPrompt, prepareWindowClose } from "./lib/document-lifecycle";
 import { isTauriRuntime, readMarkdownFile, takePendingOpenFiles } from "./lib/ipc";
 import { useResolvedTheme } from "./lib/use-resolved-theme";
 import { useAppStore } from "./stores/app-store";
@@ -18,6 +19,12 @@ const WINDOW_BACKGROUND: Record<"light" | "dark", string> = {
   light: "#ffffff",
   dark: "#1e1e1e",
 };
+
+async function setCheckedMenuItem(item: unknown, checked: boolean): Promise<void> {
+  if (!item || typeof item !== "object" || !("setChecked" in item)) return;
+  const checkItem = item as { setChecked: (checked: boolean) => Promise<void> };
+  await checkItem.setChecked(checked);
+}
 
 function App() {
   const outlineVisible = useAppStore((s) => s.outlineVisible);
@@ -31,7 +38,11 @@ function App() {
   const theme = useAppStore((s) => s.theme);
   const resolvedTheme = useResolvedTheme(theme);
   const zoom = useAppStore((s) => s.zoom);
+  const focusMode = useAppStore((s) => s.focusMode);
+  const typewriterMode = useAppStore((s) => s.typewriterMode);
+  const sourceMode = useAppStore((s) => s.sourceMode);
   const editorViewRef = useRef<EditorView | null>(null);
+  const windowCloseInProgressRef = useRef(false);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", resolvedTheme);
@@ -140,6 +151,70 @@ function App() {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
 
+    const setupCloseListener = async () => {
+      try {
+        unlisten = await listen("window-close-requested", async () => {
+          if (cancelled || windowCloseInProgressRef.current) return;
+          windowCloseInProgressRef.current = true;
+          try {
+            if (await prepareWindowClose()) {
+              await getCurrentWindow().hide();
+            }
+          } finally {
+            windowCloseInProgressRef.current = false;
+          }
+        });
+      } catch {
+        // ignore listener setup failure in non-runtime contexts
+      }
+    };
+
+    void setupCloseListener();
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let cancelled = false;
+
+    const syncMenuChecks = async () => {
+      try {
+        const { Menu } = await import("@tauri-apps/api/menu");
+        const menu = await Menu.default();
+        const items = await Promise.all([
+          menu.get("toggle-outline"),
+          menu.get("toggle-focus"),
+          menu.get("toggle-typewriter"),
+          menu.get("toggle-source"),
+        ]);
+        if (cancelled) return;
+        await Promise.all([
+          setCheckedMenuItem(items[0], outlineVisible),
+          setCheckedMenuItem(items[1], focusMode),
+          setCheckedMenuItem(items[2], typewriterMode),
+          setCheckedMenuItem(items[3], sourceMode),
+        ]);
+      } catch {
+        // menu state sync is best-effort
+      }
+    };
+
+    void syncMenuChecks();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [outlineVisible, focusMode, typewriterMode, sourceMode]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+
     const setupOpenListener = async () => {
       try {
         unlisten = await listen<string[]>("open-files", async (event) => {
@@ -200,7 +275,7 @@ function App() {
 
   return (
     <div className="app-shell" style={{ background: "var(--bg)", color: "var(--text)" }}>
-      <TabBar />
+      <TabBar onCloseTab={(index) => closeTabWithPrompt(index)} />
       <div className="app-body" style={{ gridTemplateColumns: gridCols }}>
         <div className="app-main">
           <EditorArea

@@ -1,7 +1,8 @@
 import { EditorView } from "@codemirror/view";
 import { listen } from "@tauri-apps/api/event";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { message, open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef } from "react";
+import { saveActiveTab } from "../../lib/document-lifecycle";
 import {
   exportDocument,
   getFileMtime,
@@ -10,6 +11,7 @@ import {
   writeMarkdownFile,
 } from "../../lib/ipc";
 import { useAppStore } from "../../stores/app-store";
+import { isMarkdownFormatCommand, runMarkdownFormatCommand } from "../editor/format-commands";
 import { HybridEditor } from "../editor/HybridEditor";
 
 const AUTO_SAVE_DELAY = 3000;
@@ -31,6 +33,7 @@ export function EditorArea({ onEditorViewReady }: Props) {
   const toggleSettings = useAppStore((s) => s.toggleSettings);
   const toggleFocusMode = useAppStore((s) => s.toggleFocusMode);
   const toggleTypewriterMode = useAppStore((s) => s.toggleTypewriterMode);
+  const toggleSourceMode = useAppStore((s) => s.toggleSourceMode);
   const zoomIn = useAppStore((s) => s.zoomIn);
   const zoomOut = useAppStore((s) => s.zoomOut);
   const resetZoom = useAppStore((s) => s.resetZoom);
@@ -38,10 +41,10 @@ export function EditorArea({ onEditorViewReady }: Props) {
   const openFile = useAppStore((s) => s.openFile);
   const updateActiveContent = useAppStore((s) => s.updateActiveContent);
   const setTabContent = useAppStore((s) => s.setTabContent);
-  const setTabDirty = useAppStore((s) => s.setTabDirty);
-  const setActiveTabPath = useAppStore((s) => s.setActiveTabPath);
+  const markTabSaved = useAppStore((s) => s.markTabSaved);
   const focusMode = useAppStore((s) => s.focusMode);
   const typewriterMode = useAppStore((s) => s.typewriterMode);
+  const sourceMode = useAppStore((s) => s.sourceMode);
 
   const editorViewRef = useRef<EditorView | null>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -80,62 +83,34 @@ export function EditorArea({ onEditorViewReady }: Props) {
 
   const handleSaveFile = useCallback(async () => {
     if (!isTauriRuntime()) return;
-    try {
-      if (currentFilePath) {
-        const saveIndex = activeTabIndex;
-        const savePath = currentFilePath;
-        const saveContent = currentContent;
-        await writeMarkdownFile(savePath, saveContent);
-        const latestTab = useAppStore.getState().tabs[saveIndex];
-        if (latestTab?.path === savePath && latestTab.content === saveContent) {
-          setTabDirty(saveIndex, false);
-        }
-        return;
-      }
-      const savePath = await save({
-        filters: [{ name: "Markdown", extensions: ["md", "markdown", "mdx"] }],
-        defaultPath: "untitled.md",
-      });
-      if (savePath) {
-        await writeMarkdownFile(savePath, currentContent);
-        setActiveTabPath(savePath);
-        addRecentFile(savePath);
-      }
-    } catch (err) {
-      console.error("Failed to save file:", err);
-    }
-  }, [
-    activeTabIndex,
-    currentFilePath,
-    currentContent,
-    setTabDirty,
-    setActiveTabPath,
-    addRecentFile,
-  ]);
+    return saveActiveTab();
+  }, []);
 
   const handleExport = useCallback(
     async (format: "pdf" | "docx" | "html" | "epub") => {
       if (!isTauriRuntime()) return;
-      if (!currentFilePath) {
-        await handleSaveFile();
-        const savedPath = useAppStore.getState().currentFilePath();
-        if (!savedPath) return;
-        try {
-          const result = await exportDocument(currentContent, savedPath, format);
-          console.log(`Exported to ${result}`);
-        } catch (err) {
-          console.error("Export failed:", err);
-        }
-        return;
+      let exportPath = currentFilePath;
+      if (!exportPath) {
+        const saved = await handleSaveFile();
+        if (!saved) return;
+        exportPath = useAppStore.getState().currentFilePath();
       }
+      if (!exportPath) return;
+
       try {
-        const result = await exportDocument(currentContent, currentFilePath, format);
-        console.log(`Exported to ${result}`);
+        const result = await exportDocument(
+          useAppStore.getState().currentContent(),
+          exportPath,
+          format,
+        );
+        await message(`Exported to:\n${result}`, { title: "Export Complete" });
       } catch (err) {
         console.error("Export failed:", err);
+        const detail = err instanceof Error ? err.message : String(err);
+        await message(detail, { title: "Export Failed", kind: "error" });
       }
     },
-    [currentFilePath, currentContent, handleSaveFile],
+    [currentFilePath, handleSaveFile],
   );
 
   // Auto-save
@@ -150,7 +125,7 @@ export function EditorArea({ onEditorViewReady }: Props) {
         await writeMarkdownFile(savePath, saveContent);
         const latestTab = useAppStore.getState().tabs[saveIndex];
         if (latestTab?.path === savePath && latestTab.content === saveContent) {
-          setTabDirty(saveIndex, false);
+          markTabSaved(saveIndex);
         }
       } catch {
         // silently can't save
@@ -159,23 +134,32 @@ export function EditorArea({ onEditorViewReady }: Props) {
     return () => {
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     };
-  }, [activeTabDirty, activeTabIndex, currentContent, currentFilePath, setTabDirty]);
+  }, [activeTabDirty, activeTabIndex, currentContent, currentFilePath, markTabSaved]);
 
   // File watching
   useEffect(() => {
     if (!currentFilePath) return;
     let lastMtime = 0;
     let cancelled = false;
+    const watchedPath = currentFilePath;
+    const watchedIndex = activeTabIndex;
     async function check() {
       if (cancelled) return;
       try {
-        const mtime = await getFileMtime(currentFilePath!);
+        const mtime = await getFileMtime(watchedPath);
         if (lastMtime === 0) {
           lastMtime = mtime;
-        } else if (mtime > lastMtime + 500 && !useAppStore.getState().tabs[activeTabIndex]?.dirty) {
+        } else if (
+          mtime > lastMtime + 500 &&
+          useAppStore.getState().tabs[watchedIndex]?.path === watchedPath &&
+          !useAppStore.getState().tabs[watchedIndex]?.dirty
+        ) {
           lastMtime = mtime;
-          const content = await readMarkdownFile(currentFilePath!);
-          setTabContent(activeTabIndex, content);
+          const content = await readMarkdownFile(watchedPath);
+          const latestTab = useAppStore.getState().tabs[watchedIndex];
+          if (latestTab?.path === watchedPath && !latestTab.dirty) {
+            setTabContent(watchedIndex, content);
+          }
         }
       } catch {
         // file may be deleted
@@ -199,6 +183,12 @@ export function EditorArea({ onEditorViewReady }: Props) {
       try {
         unlisten = await listen<string>("menu-action", async (event) => {
           if (cancelled) return;
+
+          if (isMarkdownFormatCommand(event.payload)) {
+            const view = editorViewRef.current;
+            if (view) runMarkdownFormatCommand(view, event.payload);
+            return;
+          }
 
           switch (event.payload) {
             case "open-file":
@@ -235,6 +225,9 @@ export function EditorArea({ onEditorViewReady }: Props) {
             case "toggle-typewriter":
               toggleTypewriterMode();
               break;
+            case "toggle-source":
+              toggleSourceMode();
+              break;
             case "zoom-in":
               zoomIn();
               break;
@@ -270,6 +263,7 @@ export function EditorArea({ onEditorViewReady }: Props) {
     toggleSettings,
     toggleFocusMode,
     toggleTypewriterMode,
+    toggleSourceMode,
     zoomIn,
     zoomOut,
     resetZoom,
@@ -280,7 +274,7 @@ export function EditorArea({ onEditorViewReady }: Props) {
       <div className="flex-1 overflow-hidden">
         <HybridEditor
           mdPath={currentFilePath}
-          key={`${activeTabIndex}-${activeTab?.path ?? "new"}`}
+          key={`${activeTabIndex}-${activeTab?.path ?? "new"}-${sourceMode ? "source" : "hybrid"}`}
           initialContent={currentContent}
           onContentChange={handleContentChange}
           onNewDocument={() => openNewTab("")}
@@ -292,6 +286,7 @@ export function EditorArea({ onEditorViewReady }: Props) {
           }}
           focusMode={focusMode}
           typewriterMode={typewriterMode}
+          sourceMode={sourceMode}
         />
       </div>
     </div>

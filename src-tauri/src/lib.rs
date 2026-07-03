@@ -52,6 +52,10 @@ pub fn run() {
                     .accelerator("CmdOrCtrl+Alt+T")
                     .checked(false)
                     .build(handle)?;
+            let source_mode = CheckMenuItemBuilder::with_id("toggle-source", "Source Code Mode")
+                .accelerator("CmdOrCtrl+/")
+                .checked(false)
+                .build(handle)?;
             let zoom_in = MenuItemBuilder::with_id("zoom-in", "Zoom In")
                 .accelerator("CmdOrCtrl+Plus")
                 .build(handle)?;
@@ -60,6 +64,45 @@ pub fn run() {
                 .build(handle)?;
             let zoom_reset = MenuItemBuilder::with_id("zoom-reset", "Actual Size")
                 .accelerator("CmdOrCtrl+0")
+                .build(handle)?;
+            let format_bold = MenuItemBuilder::with_id("format-bold", "Bold")
+                .accelerator("CmdOrCtrl+B")
+                .build(handle)?;
+            let format_italic = MenuItemBuilder::with_id("format-italic", "Italic")
+                .accelerator("CmdOrCtrl+I")
+                .build(handle)?;
+            let format_strike = MenuItemBuilder::with_id("format-strike", "Strikethrough")
+                .accelerator("CmdOrCtrl+Shift+X")
+                .build(handle)?;
+            let format_inline_code = MenuItemBuilder::with_id("format-inline-code", "Inline Code")
+                .accelerator("CmdOrCtrl+E")
+                .build(handle)?;
+            let format_link = MenuItemBuilder::with_id("format-link", "Link")
+                .accelerator("CmdOrCtrl+K")
+                .build(handle)?;
+            let format_h1 = MenuItemBuilder::with_id("format-heading-1", "Heading 1")
+                .accelerator("CmdOrCtrl+Alt+1")
+                .build(handle)?;
+            let format_h2 = MenuItemBuilder::with_id("format-heading-2", "Heading 2")
+                .accelerator("CmdOrCtrl+Alt+2")
+                .build(handle)?;
+            let format_h3 = MenuItemBuilder::with_id("format-heading-3", "Heading 3")
+                .accelerator("CmdOrCtrl+Alt+3")
+                .build(handle)?;
+            let format_bullet_list = MenuItemBuilder::with_id("format-bullet-list", "Bullet List")
+                .accelerator("CmdOrCtrl+Shift+8")
+                .build(handle)?;
+            let format_ordered_list =
+                MenuItemBuilder::with_id("format-ordered-list", "Ordered List")
+                    .accelerator("CmdOrCtrl+Shift+7")
+                    .build(handle)?;
+            let format_task_list =
+                MenuItemBuilder::with_id("format-task-list", "Task List").build(handle)?;
+            let format_quote = MenuItemBuilder::with_id("format-quote", "Block Quote")
+                .accelerator("CmdOrCtrl+Shift+9")
+                .build(handle)?;
+            let format_code_fence = MenuItemBuilder::with_id("format-code-fence", "Code Fence")
+                .accelerator("CmdOrCtrl+Alt+C")
                 .build(handle)?;
 
             let app_menu = SubmenuBuilder::new(handle, "Hebe")
@@ -97,11 +140,29 @@ pub fn run() {
                 .item(&PredefinedMenuItem::paste(handle, None)?)
                 .item(&PredefinedMenuItem::select_all(handle, None)?)
                 .build()?;
+            let format_menu = SubmenuBuilder::new(handle, "Format")
+                .item(&format_bold)
+                .item(&format_italic)
+                .item(&format_strike)
+                .item(&format_inline_code)
+                .item(&format_link)
+                .separator()
+                .item(&format_h1)
+                .item(&format_h2)
+                .item(&format_h3)
+                .separator()
+                .item(&format_bullet_list)
+                .item(&format_ordered_list)
+                .item(&format_task_list)
+                .item(&format_quote)
+                .item(&format_code_fence)
+                .build()?;
             let view_menu = SubmenuBuilder::new(handle, "View")
                 .item(&toggle_outline)
                 .separator()
                 .item(&focus_mode)
                 .item(&typewriter_mode)
+                .item(&source_mode)
                 .separator()
                 .item(&zoom_in)
                 .item(&zoom_out)
@@ -121,6 +182,7 @@ pub fn run() {
                 .item(&app_menu)
                 .item(&file_menu)
                 .item(&edit_menu)
+                .item(&format_menu)
                 .item(&view_menu)
                 .item(&window_menu)
                 .item(&help_menu)
@@ -137,7 +199,7 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                let _ = window.hide();
+                let _ = window.emit("window-close-requested", ());
             }
         })
         .plugin(tauri_plugin_dialog::init())

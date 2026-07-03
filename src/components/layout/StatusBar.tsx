@@ -5,12 +5,13 @@ export function StatusBar() {
   const currentContent = useAppStore((s) => s.currentContent());
   const focusMode = useAppStore((s) => s.focusMode);
   const typewriterMode = useAppStore((s) => s.typewriterMode);
+  const sourceMode = useAppStore((s) => s.sourceMode);
   const zoom = useAppStore((s) => s.zoom);
   const zoomIn = useAppStore((s) => s.zoomIn);
   const zoomOut = useAppStore((s) => s.zoomOut);
   const resetZoom = useAppStore((s) => s.resetZoom);
   const lineCount = currentContent ? currentContent.split("\n").length : 1;
-  const wordCount = currentContent.trim() ? currentContent.trim().split(/\s+/).length : 0;
+  const wordCount = countMarkdownWords(currentContent);
 
   return (
     <div
@@ -24,6 +25,7 @@ export function StatusBar() {
       <div className="status-cluster">
         {focusMode && <span className="status-pill">Focus</span>}
         {typewriterMode && <span className="status-pill">Typewriter</span>}
+        {sourceMode && <span className="status-pill">Source</span>}
         <button
           type="button"
           className="status-icon-button"
@@ -54,4 +56,15 @@ export function StatusBar() {
       </div>
     </div>
   );
+}
+
+function countMarkdownWords(content: string): number {
+  const latinWords = content.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) ?? [];
+  const cjkChars =
+    content.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu) ??
+    [];
+  const cjkInLatinWords = latinWords
+    .join("")
+    .match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu);
+  return latinWords.length + cjkChars.length - (cjkInLatinWords?.length ?? 0);
 }

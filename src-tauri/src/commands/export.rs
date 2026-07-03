@@ -12,7 +12,9 @@ pub async fn export_document(
         _ => return Err(format!("Unsupported export format: {format}")),
     };
 
-    let output_path = format!("{}.{}", input_path.trim_end_matches(".md"), ext);
+    let mut output_path = std::path::PathBuf::from(&input_path);
+    output_path.set_extension(ext);
+    let output_path = output_path.to_string_lossy().to_string();
 
     let mut child = std::process::Command::new("pandoc")
         .arg("-o")
@@ -20,6 +22,7 @@ pub async fn export_document(
         .arg("--from=markdown")
         .arg(format!("--to={format}"))
         .stdin(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -32,18 +35,23 @@ pub async fn export_document(
 
     use std::io::Write;
     if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(content.as_bytes());
+        stdin
+            .write_all(content.as_bytes())
+            .map_err(|e| format!("Failed to send document to pandoc: {e}"))?;
     }
-    // Drop stdin to close the pipe before waiting
-    drop(child.stdin.take());
 
-    let status = child
-        .wait()
+    let output = child
+        .wait_with_output()
         .map_err(|e| format!("Pandoc process error: {e}"))?;
 
-    if status.success() {
+    if output.status.success() {
         Ok(output_path)
     } else {
-        Err(format!("Pandoc exited with status: {status}"))
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if stderr.is_empty() {
+            Err(format!("Pandoc exited with status: {}", output.status))
+        } else {
+            Err(stderr)
+        }
     }
 }

@@ -1,9 +1,24 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
-import { StateField, type EditorState, type Text } from "@codemirror/state";
+import { LanguageDescription } from "@codemirror/language";
+import { languages } from "@codemirror/language-data";
+import { type EditorState, StateField, type Text } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
+import { highlightCode, tags as highlightTags, tagHighlighter } from "@lezer/highlight";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import katex from "katex";
 import { isTauriRuntime } from "../../../lib/ipc";
 import { dirname } from "../../../lib/path";
+import {
+  getFenceLanguage,
+  isFenceCloser,
+  isMermaidLanguage,
+  isTableDelimiter,
+  isTableRow,
+  type ParsedTable,
+  parseImageLine,
+  parseMarkdownTable,
+  readFenceOpener,
+  tableCellSpans,
+} from "../markdown-kernel";
 import {
   editorFocusedField,
   previewDecorationsNeedRefresh,
@@ -12,6 +27,25 @@ import {
 } from "./hybrid-preview";
 
 let widgetIdCounter = 0;
+
+const codeHighlighter = tagHighlighter([
+  { tag: highlightTags.keyword, class: "tok-keyword" },
+  { tag: [highlightTags.string, highlightTags.special(highlightTags.string)], class: "tok-string" },
+  { tag: [highlightTags.number, highlightTags.bool, highlightTags.null], class: "tok-literal" },
+  {
+    tag: [highlightTags.comment, highlightTags.lineComment, highlightTags.blockComment],
+    class: "tok-comment",
+  },
+  {
+    tag: [
+      highlightTags.function(highlightTags.variableName),
+      highlightTags.function(highlightTags.propertyName),
+    ],
+    class: "tok-function",
+  },
+  { tag: [highlightTags.typeName, highlightTags.className], class: "tok-type" },
+  { tag: [highlightTags.operator, highlightTags.punctuation], class: "tok-punctuation" },
+]);
 
 class MathWidget extends WidgetType {
   readonly latex: string;
@@ -156,11 +190,51 @@ class CodeBlockWidget extends WidgetType {
     const code = document.createElement("code");
     code.textContent = this.code;
     pre.appendChild(code);
+
+    if (this.language) {
+      void highlightCodeElement(code, this.code, this.language);
+    }
+
     return pre;
   }
 
   ignoreEvent(): boolean {
     return false;
+  }
+}
+
+async function highlightCodeElement(
+  element: HTMLElement,
+  source: string,
+  languageName: string,
+): Promise<void> {
+  try {
+    const description = LanguageDescription.matchLanguageName(languages, languageName, true);
+    if (!description) return;
+
+    const support = await description.load();
+    const tree = support.language.parser.parse(source);
+    if (!element.isConnected) return;
+
+    element.replaceChildren();
+    highlightCode(
+      source,
+      tree,
+      codeHighlighter,
+      (text, classes) => {
+        if (!classes) {
+          element.appendChild(document.createTextNode(text));
+          return;
+        }
+        const span = document.createElement("span");
+        span.className = classes;
+        span.textContent = text;
+        element.appendChild(span);
+      },
+      () => element.appendChild(document.createTextNode("\n")),
+    );
+  } catch {
+    // Unknown or unavailable language packages fall back to plain text.
   }
 }
 
@@ -270,14 +344,6 @@ class TableWidget extends WidgetType {
   ignoreEvent(): boolean {
     return false;
   }
-}
-
-type TableAlign = "left" | "center" | "right";
-
-interface ParsedTable {
-  headers: string[];
-  align: TableAlign[];
-  rows: string[][];
 }
 
 function makeEditableWidget(
@@ -396,46 +462,6 @@ function tableClickPosition(
   return line.from + clampInt(offset, span.contentFrom, span.contentTo);
 }
 
-interface TableCellSpan {
-  contentFrom: number;
-  contentTo: number;
-}
-
-function tableCellSpans(text: string): TableCellSpan[] {
-  const rawCells: { from: number; to: number }[] = [];
-  let escaped = false;
-  let cellFrom = 0;
-
-  for (let index = 0; index < text.length; index++) {
-    const char = text[index];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (char === "\\") {
-      escaped = true;
-      continue;
-    }
-    if (char === "|") {
-      rawCells.push({ from: cellFrom, to: index });
-      cellFrom = index + 1;
-    }
-  }
-  rawCells.push({ from: cellFrom, to: text.length });
-
-  if (rawCells[0]?.from === 0 && rawCells[0].to === 0) rawCells.shift();
-  const last = rawCells.at(-1);
-  if (last && last.from === text.length && last.to === text.length) rawCells.pop();
-
-  return rawCells.map((cell) => {
-    let contentFrom = cell.from;
-    let contentTo = cell.to;
-    while (contentFrom < contentTo && /\s/.test(text[contentFrom])) contentFrom += 1;
-    while (contentTo > contentFrom && /\s/.test(text[contentTo - 1])) contentTo -= 1;
-    return { contentFrom, contentTo };
-  });
-}
-
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -469,16 +495,6 @@ interface BlockRange {
   source: string;
 }
 
-interface FenceMarker {
-  marker: "`" | "~";
-  length: number;
-}
-
-interface ImageLine {
-  alt: string;
-  src: string;
-}
-
 const MAX_BLOCK_SCAN_LINES = 500;
 const MAX_INLINE_MATH_SCAN_LENGTH = 6000;
 
@@ -503,10 +519,9 @@ function blockDecorations(state: EditorState, mdPath: string | null): Decoration
           from: fencedBlock.from,
           to: fencedBlock.to,
           widget: Decoration.replace({
-            widget:
-              language === "mermaid"
-                ? new MermaidWidget(code, fencedBlock.from, fencedBlock.to)
-                : new CodeBlockWidget(code, language, fencedBlock.from, fencedBlock.to),
+            widget: isMermaidLanguage(language)
+              ? new MermaidWidget(code, fencedBlock.from, fencedBlock.to)
+              : new CodeBlockWidget(code, language, fencedBlock.from, fencedBlock.to),
             block: true,
           }),
         });
@@ -636,24 +651,6 @@ function readFencedBlock(doc: Text, startLine: number): BlockRange | null {
   };
 }
 
-function getFenceLanguage(line: string): string | null {
-  const match = line.match(/^\s{0,3}(`{3,}|~{3,})\s*([^\s`~]+)?/);
-  if (!match?.[2]) return null;
-  return match[2].replace(/[{}]/g, "").toLowerCase();
-}
-
-function readFenceOpener(text: string): FenceMarker | null {
-  const match = text.match(/^\s{0,3}(`{3,}|~{3,})/);
-  if (!match) return null;
-  const marker = match[1][0] as "`" | "~";
-  return { marker, length: match[1].length };
-}
-
-function isFenceCloser(text: string, fence: FenceMarker): boolean {
-  const escapedMarker = fence.marker === "`" ? "`" : "~";
-  return new RegExp(`^\\s{0,3}${escapedMarker}{${fence.length},}\\s*$`).test(text);
-}
-
 function getInnerBlockSource(doc: Text, startLine: number, endLine: number): string {
   const lines: string[] = [];
   for (let lineNo = startLine + 1; lineNo < endLine; lineNo++) {
@@ -714,38 +711,6 @@ function readTableBlock(doc: Text, startLine: number): BlockRange | null {
   };
 }
 
-function isTableRow(line: string): boolean {
-  const trimmed = line.trim();
-  return trimmed.length > 0 && trimmed.includes("|") && !/^\s{0,3}(```|~~~)/.test(trimmed);
-}
-
-function isTableDelimiter(line: string): boolean {
-  const cells = splitTableRow(line);
-  return cells.length >= 2 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
-}
-
-function parseImageLine(line: string): ImageLine | null {
-  const match = line.match(/^\s*!\[([^\]\n]*)\]\((.+)\)\s*$/);
-  if (!match) return null;
-  const src = parseImageTarget(match[2]);
-  if (!src) return null;
-  return { alt: match[1], src };
-}
-
-function parseImageTarget(target: string): string | null {
-  const trimmed = target.trim();
-  if (!trimmed) return null;
-
-  if (trimmed.startsWith("<")) {
-    const end = trimmed.indexOf(">");
-    return end > 1 ? unescapeMarkdownPath(trimmed.slice(1, end)) : null;
-  }
-
-  const titleStart = trimmed.search(/\s+(?=["'(])/);
-  const path = titleStart >= 0 ? trimmed.slice(0, titleStart) : trimmed;
-  return unescapeMarkdownPath(path);
-}
-
 function resolveImageSrc(src: string, mdPath: string | null): string {
   if (/^(?:[a-z][a-z\d+.-]*:|#)/i.test(src)) return src;
   if (!isTauriRuntime()) return src;
@@ -766,71 +731,6 @@ function joinFilesystemPath(basePath: string, childPath: string): string {
 
 function isAbsolutePath(path: string): boolean {
   return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path);
-}
-
-function unescapeMarkdownPath(path: string): string {
-  return path.replace(/\\([\\()[\] ])/g, "$1");
-}
-
-function parseMarkdownTable(source: string): ParsedTable | null {
-  const lines = source
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (lines.length < 2) return null;
-
-  const headers = splitTableRow(lines[0]);
-  const delimiter = splitTableRow(lines[1]);
-  if (!headers.length || delimiter.length < headers.length) return null;
-  if (!delimiter.every((cell) => /^:?-{3,}:?$/.test(cell.trim()))) return null;
-
-  const align = delimiter.map((cell): TableAlign => {
-    const trimmed = cell.trim();
-    if (trimmed.startsWith(":") && trimmed.endsWith(":")) return "center";
-    if (trimmed.endsWith(":")) return "right";
-    return "left";
-  });
-
-  const rows = lines.slice(2).map(splitTableRow);
-  return { headers, align, rows };
-}
-
-function splitTableRow(line: string): string[] {
-  const trimmed = line.replace(/^\|/, "").replace(/\|$/, "");
-  const cells: string[] = [];
-  let current = "";
-  let escaped = false;
-
-  for (const char of trimmed) {
-    if (escaped) {
-      current += char;
-      escaped = false;
-      continue;
-    }
-    if (char === "\\") {
-      escaped = true;
-      continue;
-    }
-    if (char === "|") {
-      cells.push(cleanInlineMarkdown(current));
-      current = "";
-      continue;
-    }
-    current += char;
-  }
-
-  cells.push(cleanInlineMarkdown(current));
-  return cells;
-}
-
-function cleanInlineMarkdown(value: string): string {
-  return value
-    .trim()
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/__([^_]+)__/g, "$1")
-    .replace(/\*([^*]+)\*/g, "$1")
-    .replace(/_([^_]+)_/g, "$1");
 }
 
 interface Span {

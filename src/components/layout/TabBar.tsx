@@ -1,11 +1,16 @@
 import { basename } from "../../lib/path";
 import { useAppStore } from "../../stores/app-store";
 
-export function TabBar() {
+interface Props {
+  onCloseTab?: (index: number) => void | boolean | Promise<void | boolean>;
+}
+
+export function TabBar({ onCloseTab }: Props) {
   const tabs = useAppStore((s) => s.tabs);
   const activeTabIndex = useAppStore((s) => s.activeTabIndex);
   const setActiveTab = useAppStore((s) => s.setActiveTab);
   const closeTab = useAppStore((s) => s.closeTab);
+  const requestCloseTab = onCloseTab ?? closeTab;
 
   return (
     <div className="tab-bar flex items-center gap-0 px-2 shrink-0 overflow-x-auto">
@@ -29,7 +34,7 @@ export function TabBar() {
                 const menu = document.createElement("div");
                 menu.style.cssText = `position:fixed;left:${e.clientX}px;top:${e.clientY}px;z-index:9999;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:4px;min-width:160px;box-shadow:0 4px 12px rgba(0,0,0,0.15);`;
                 const menuItems: [string, () => void][] = [
-                  ["Close", () => closeTab(i)],
+                  ["Close", () => void requestCloseTab(i)],
                   ...(i > 0
                     ? ([["Move Left", () => useAppStore.getState().moveTab(i, i - 1)]] as [
                         string,
@@ -80,7 +85,7 @@ export function TabBar() {
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  closeTab(i);
+                  void requestCloseTab(i);
                 }}
               >
                 ×

@@ -3,7 +3,7 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
-import { EditorState, type Extension } from "@codemirror/state";
+import { Annotation, EditorState, type Extension } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { useEffect, useRef, useState } from "react";
@@ -17,6 +17,7 @@ import {
   pasteImagePlugin,
   previewRevealRangeField,
 } from "./extensions/hybrid-preview";
+import { runMarkdownFormatCommand } from "./format-commands";
 
 const markdownHighlightStyle = HighlightStyle.define([
   { tag: tags.heading1, class: "md-heading-1" },
@@ -36,6 +37,8 @@ const markdownHighlightStyle = HighlightStyle.define([
   { tag: tags.labelName, class: "md-mark" },
 ]);
 
+const externalContentSync = Annotation.define<boolean>();
+
 interface HybridEditorProps {
   initialContent?: string;
   onContentChange?: (content: string) => void;
@@ -44,6 +47,7 @@ interface HybridEditorProps {
   onSaveFile?: () => void;
   focusMode?: boolean;
   typewriterMode?: boolean;
+  sourceMode?: boolean;
   onEditorView?: (view: EditorView) => void;
   mdPath?: string | null;
 }
@@ -56,6 +60,7 @@ export function HybridEditor({
   onSaveFile,
   focusMode = false,
   typewriterMode = false,
+  sourceMode = false,
   onEditorView,
   mdPath,
 }: HybridEditorProps) {
@@ -67,7 +72,8 @@ export function HybridEditor({
     if (!containerRef.current || viewRef.current) return;
 
     const updateContent = EditorView.updateListener.of((update) => {
-      if (update.docChanged && onContentChange) {
+      const externalUpdate = update.transactions.some((tr) => tr.annotation(externalContentSync));
+      if (update.docChanged && !externalUpdate && onContentChange) {
         onContentChange(update.state.doc.toString());
       }
     });
@@ -95,6 +101,26 @@ export function HybridEditor({
         },
         preventDefault: true,
       },
+      {
+        key: "Mod-b",
+        run: (view) => runMarkdownFormatCommand(view, "format-bold"),
+        preventDefault: true,
+      },
+      {
+        key: "Mod-i",
+        run: (view) => runMarkdownFormatCommand(view, "format-italic"),
+        preventDefault: true,
+      },
+      {
+        key: "Mod-e",
+        run: (view) => runMarkdownFormatCommand(view, "format-inline-code"),
+        preventDefault: true,
+      },
+      {
+        key: "Mod-k",
+        run: (view) => runMarkdownFormatCommand(view, "format-link"),
+        preventDefault: true,
+      },
     ]);
 
     const extensions: Extension[] = [
@@ -109,9 +135,9 @@ export function HybridEditor({
       editorFocusPlugin,
       editorFocusedField,
       previewRevealRangeField,
-      inlinePreviewPlugin,
-      clickRevealPlugin,
-      blockWidgetPlugin(mdPath ?? null),
+      ...(sourceMode
+        ? []
+        : [inlinePreviewPlugin, clickRevealPlugin, blockWidgetPlugin(mdPath ?? null)]),
 
       pasteImagePlugin(mdPath ?? null),
 
@@ -152,6 +178,7 @@ export function HybridEditor({
     if (initialContent !== currentContent) {
       viewRef.current.dispatch({
         changes: { from: 0, to: currentContent.length, insert: initialContent },
+        annotations: externalContentSync.of(true),
       });
     }
   }, [initialContent, isReady]);

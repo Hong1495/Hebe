@@ -1,5 +1,12 @@
-import { StateEffect, StateField, type EditorState, type Transaction } from "@codemirror/state";
+import { type EditorState, StateEffect, StateField, type Transaction } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
+import {
+  type FenceMarker,
+  type InlineSpanKind,
+  isFenceCloser,
+  readFenceOpener,
+  scanInlineMarkdownSpans,
+} from "../markdown-kernel";
 
 export interface PreviewRevealRange {
   from: number;
@@ -64,20 +71,10 @@ export function previewDecorationsNeedRefresh(transaction: Transaction): boolean
 
 const MAX_INLINE_SCAN_LENGTH = 6000;
 
-interface ActiveFence {
-  marker: "`" | "~";
-  length: number;
-}
-
 interface DecoSpec {
   from: number;
   to: number;
   deco: Decoration;
-}
-
-interface Span {
-  from: number;
-  to: number;
 }
 
 class ListMarkerWidget extends WidgetType {
@@ -128,7 +125,7 @@ function hideMarkDeco(state: EditorState): DecorationSet {
     for (let i = fromLine; i <= toLine; i++) revealLines.add(i);
   }
 
-  let activeFence: ActiveFence | null = null;
+  let activeFence: FenceMarker | null = null;
 
   for (let lineNo = 1; lineNo <= state.doc.lines; lineNo++) {
     const line = state.doc.line(lineNo);
@@ -156,21 +153,9 @@ function hideMarkDeco(state: EditorState): DecorationSet {
   );
 }
 
-function readFenceOpener(text: string): ActiveFence | null {
-  const match = text.match(/^\s{0,3}(`{3,}|~{3,})/);
-  if (!match) return null;
-  const marker = match[1][0] as "`" | "~";
-  return { marker, length: match[1].length };
-}
-
-function isFenceCloser(text: string, fence: ActiveFence): boolean {
-  const escapedMarker = fence.marker === "`" ? "`" : "~";
-  return new RegExp(`^\\s{0,3}${escapedMarker}{${fence.length},}\\s*$`).test(text);
-}
-
 function scanFencedCodeLine(text: string, lineFrom: number, decorations: DecoSpec[]): void {
   addLineClass(lineFrom, "md-code-block-line", decorations);
-  if (/^\s{0,3}(`{3,}|~{3,})/.test(text)) {
+  if (readFenceOpener(text)) {
     addLineClass(lineFrom, "md-code-fence-line", decorations);
   }
 }
@@ -216,7 +201,7 @@ function scanLineDecorations(
     }
   }
 
-  if (/^\s{0,3}(```|~~~)/.test(text)) {
+  if (readFenceOpener(text)) {
     addLineClass(lineFrom, "md-code-fence-line", decorations);
   }
 
@@ -235,136 +220,23 @@ function scanInlineMarkdown(
   revealed: boolean,
   decorations: DecoSpec[],
 ): void {
-  const protectedSpans: Span[] = [];
-
-  scanCodeSpans(text, lineFrom, revealed, decorations, protectedSpans);
-  scanLinks(text, lineFrom, revealed, decorations, protectedSpans);
-  scanDelimited(
-    text,
-    lineFrom,
-    revealed,
-    decorations,
-    protectedSpans,
-    /(\*\*|__)([^*_]+?)\1/g,
-    "md-strong",
-  );
-  scanDelimited(
-    text,
-    lineFrom,
-    revealed,
-    decorations,
-    protectedSpans,
-    /~~([^~]+?)~~/g,
-    "md-strike",
-  );
-  scanEmphasis(text, lineFrom, revealed, decorations, protectedSpans);
-}
-
-function scanCodeSpans(
-  text: string,
-  lineFrom: number,
-  revealed: boolean,
-  decorations: DecoSpec[],
-  protectedSpans: Span[],
-): void {
-  const codeRe = /(`+)([^`\n]+?)\1/g;
-  let match: RegExpExecArray | null;
-  while ((match = codeRe.exec(text)) !== null) {
-    const from = lineFrom + match.index;
-    const to = from + match[0].length;
-    const tickLen = match[1].length;
-    const innerFrom = from + tickLen;
-    const innerTo = to - tickLen;
-    if (innerFrom >= innerTo) continue;
-
-    addMark(innerFrom, innerTo, "md-code", decorations);
+  for (const span of scanInlineMarkdownSpans(text)) {
+    const contentFrom = lineFrom + span.contentFrom;
+    const contentTo = lineFrom + span.contentTo;
+    addMark(contentFrom, contentTo, inlineClassName(span.kind), decorations);
     if (!revealed) {
-      addReplace(from, innerFrom, decorations);
-      addReplace(innerTo, to, decorations);
-    }
-    protectedSpans.push({ from, to });
-  }
-}
-
-function scanLinks(
-  text: string,
-  lineFrom: number,
-  revealed: boolean,
-  decorations: DecoSpec[],
-  protectedSpans: Span[],
-): void {
-  const linkRe = /(!?)\[([^\]\n]+)\]\(([^)\n]+)\)/g;
-  let match: RegExpExecArray | null;
-  while ((match = linkRe.exec(text)) !== null) {
-    if (match[1]) continue;
-    const from = lineFrom + match.index;
-    const to = from + match[0].length;
-    const labelFrom = from + 1;
-    const labelTo = labelFrom + match[2].length;
-    if (spanOverlaps({ from, to }, protectedSpans)) continue;
-
-    addMark(labelFrom, labelTo, "md-link", decorations);
-    if (!revealed) {
-      addReplace(from, labelFrom, decorations);
-      addReplace(labelTo, to, decorations);
-    }
-    protectedSpans.push({ from, to });
-  }
-}
-
-function scanDelimited(
-  text: string,
-  lineFrom: number,
-  revealed: boolean,
-  decorations: DecoSpec[],
-  protectedSpans: Span[],
-  regexp: RegExp,
-  className: string,
-): void {
-  let match: RegExpExecArray | null;
-  while ((match = regexp.exec(text)) !== null) {
-    const from = lineFrom + match.index;
-    const to = from + match[0].length;
-    if (spanOverlaps({ from, to }, protectedSpans)) continue;
-
-    const delimiter = className === "md-strike" ? "~~" : match[1];
-    const innerFrom = from + delimiter.length;
-    const innerTo = to - delimiter.length;
-    if (innerFrom >= innerTo) continue;
-
-    addMark(innerFrom, innerTo, className, decorations);
-    if (!revealed) {
-      addReplace(from, innerFrom, decorations);
-      addReplace(innerTo, to, decorations);
+      addReplace(lineFrom + span.openingFrom, lineFrom + span.openingTo, decorations);
+      addReplace(lineFrom + span.closingFrom, lineFrom + span.closingTo, decorations);
     }
   }
 }
 
-function scanEmphasis(
-  text: string,
-  lineFrom: number,
-  revealed: boolean,
-  decorations: DecoSpec[],
-  protectedSpans: Span[],
-): void {
-  const emphasisRe = /(^|[\s([{"'])((?:\*|_))([^*_]+?)\2(?=$|[\s.,;:!?)]}"'])/g;
-  let match: RegExpExecArray | null;
-  while ((match = emphasisRe.exec(text)) !== null) {
-    const delimiterFrom = lineFrom + match.index + match[1].length;
-    const from = delimiterFrom;
-    const to = delimiterFrom + match[2].length + match[3].length + match[2].length;
-    if (spanOverlaps({ from, to }, protectedSpans)) continue;
-
-    const innerFrom = delimiterFrom + match[2].length;
-    const innerTo = innerFrom + match[3].length;
-    if (innerFrom >= innerTo) continue;
-
-    addMark(innerFrom, innerTo, "md-emphasis", decorations);
-    if (!revealed) {
-      addReplace(from, innerFrom, decorations);
-      addReplace(innerTo, to, decorations);
-    }
-  }
+function inlineClassName(kind: InlineSpanKind): string {
+  if (kind === "code") return "md-code";
+  if (kind === "link") return "md-link";
+  if (kind === "strong") return "md-strong";
+  if (kind === "strike") return "md-strike";
+  return "md-emphasis";
 }
 
 function addLineClass(from: number, className: string, decorations: DecoSpec[]): void {
@@ -383,10 +255,6 @@ function addMark(from: number, to: number, className: string, decorations: DecoS
 function addReplace(from: number, to: number, decorations: DecoSpec[]): void {
   if (from >= to) return;
   decorations.push({ from, to, deco: Decoration.replace({ inclusive: false }) });
-}
-
-function spanOverlaps(span: Span, spans: Span[]): boolean {
-  return spans.some((other) => span.from < other.to && span.to > other.from);
 }
 
 function selectionTouchesRange(
@@ -859,5 +727,28 @@ export const hybridBaseTheme = EditorView.baseTheme({
     color: "var(--md-code-block-text)",
     background: "var(--md-code-block-bg)",
     padding: "0 14px",
+  },
+  ".cm-code-block-widget .tok-keyword": {
+    color: "var(--md-link)",
+    fontWeight: "600",
+  },
+  ".cm-code-block-widget .tok-string": {
+    color: "var(--md-strong)",
+  },
+  ".cm-code-block-widget .tok-literal": {
+    color: "var(--accent)",
+  },
+  ".cm-code-block-widget .tok-comment": {
+    color: "var(--md-muted)",
+    fontStyle: "italic",
+  },
+  ".cm-code-block-widget .tok-function": {
+    color: "var(--md-heading)",
+  },
+  ".cm-code-block-widget .tok-type": {
+    color: "var(--md-link)",
+  },
+  ".cm-code-block-widget .tok-punctuation": {
+    color: "var(--md-mark)",
   },
 });
