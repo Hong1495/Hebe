@@ -177,7 +177,7 @@ export interface MarkdownTableCellTarget {
   cellIndex: number;
 }
 
-export type MarkdownTableNavigationDirection = "next" | "previous";
+export type MarkdownTableNavigationDirection = "next" | "previous" | "up" | "down";
 
 export interface MarkdownTableRowInsertEdit {
   change: MarkdownTextChange;
@@ -530,6 +530,12 @@ export function navigateMarkdownTableCell(
   if (rowIndex < 0) return null;
 
   const cellIndex = clampInt(target.cellIndex, 0, columnCount - 1);
+  if (direction === "up" || direction === "down") {
+    const nextRowIndex = rowIndex + (direction === "down" ? 1 : -1);
+    const nextRow = rows[nextRowIndex];
+    return nextRow ? { ...nextRow, cellIndex } : null;
+  }
+
   const nextFlatIndex = rowIndex * columnCount + cellIndex + (direction === "next" ? 1 : -1);
   if (nextFlatIndex < 0 || nextFlatIndex >= rows.length * columnCount) return null;
 
@@ -539,7 +545,10 @@ export function navigateMarkdownTableCell(
   };
 }
 
-export function appendMarkdownTableRow(block: TableBlock): MarkdownTableRowInsertEdit | null {
+export function appendMarkdownTableRow(
+  block: TableBlock,
+  cellIndex = 0,
+): MarkdownTableRowInsertEdit | null {
   const columnCount = block.table.headers.length;
   if (columnCount <= 0) return null;
 
@@ -553,7 +562,7 @@ export function appendMarkdownTableRow(block: TableBlock): MarkdownTableRowInser
     target: {
       rowKind: "body",
       rowIndex: block.table.rows.length,
-      cellIndex: 0,
+      cellIndex: clampInt(cellIndex, 0, columnCount - 1),
     },
   };
 }

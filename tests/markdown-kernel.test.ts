@@ -168,6 +168,12 @@ describe("markdown kernel", () => {
     expect(
       navigateMarkdownTableCell(block, { rowKind: "body", rowIndex: 1, cellIndex: 1 }, "next"),
     ).toBeNull();
+    expect(
+      navigateMarkdownTableCell(block, { rowKind: "body", rowIndex: 0, cellIndex: 1 }, "down"),
+    ).toEqual({ rowKind: "body", rowIndex: 1, cellIndex: 1 });
+    expect(
+      navigateMarkdownTableCell(block, { rowKind: "body", rowIndex: 0, cellIndex: 0 }, "up"),
+    ).toEqual({ rowKind: "header", rowIndex: 0, cellIndex: 0 });
   });
 
   it("creates append-row edits from table shape", () => {
@@ -182,6 +188,20 @@ describe("markdown kernel", () => {
       "| A | B |\n| --- | --- |\n| x | y |\n|  |  |",
     );
     expect(edit?.target).toEqual({ rowKind: "body", rowIndex: 1, cellIndex: 0 });
+  });
+
+  it("creates append-row edits targeting the requested column", () => {
+    const source = "| A | B |\n| --- | --- |";
+    const block = parseMarkdownBlocks(source)[0];
+    if (block.kind !== "table") throw new Error("expected table block");
+
+    const edit = appendMarkdownTableRow(block, 1);
+
+    expect(edit).not.toBeNull();
+    expect(applyMarkdownEdit(source, { changes: [(edit as NonNullable<typeof edit>).change] })).toBe(
+      "| A | B |\n| --- | --- |\n|  |  |",
+    );
+    expect(edit?.target).toEqual({ rowKind: "body", rowIndex: 0, cellIndex: 1 });
   });
 
   it("combines last-cell updates with table row insertion", () => {

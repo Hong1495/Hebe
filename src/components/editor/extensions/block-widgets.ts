@@ -509,7 +509,43 @@ function makeTableCellInput(
     }
     if (event.key === "Enter") {
       event.preventDefault();
-      commit();
+      const direction = event.shiftKey ? "up" : "down";
+      const nextTarget = navigateMarkdownTableCell(block, target, direction);
+      const change = pendingCellChange();
+
+      if (nextTarget) {
+        if (change) {
+          view.dispatch({
+            changes: change,
+            effects: setPreviewRevealRange.of(null),
+          });
+        }
+        focusMarkdownTableCellInput(view, nextTarget);
+        return;
+      }
+
+      if (!event.shiftKey) {
+        const rowInsert = appendMarkdownTableRow(block, target.cellIndex);
+        if (rowInsert) {
+          view.dispatch({
+            changes: change ? [change, rowInsert.change] : rowInsert.change,
+            selection: {
+              anchor: rowInsert.change.from + rowInsert.change.insert.length,
+            },
+            effects: setPreviewRevealRange.of(null),
+          });
+          focusMarkdownTableCellInput(view, rowInsert.target);
+          return;
+        }
+      }
+
+      if (change) {
+        view.dispatch({
+          changes: change,
+          selection: { anchor: change.from + change.insert.length },
+          effects: setPreviewRevealRange.of(null),
+        });
+      }
       input.blur();
     }
     if (event.key === "Escape") {
