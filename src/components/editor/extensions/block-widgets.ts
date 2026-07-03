@@ -145,6 +145,7 @@ class MermaidWidget extends WidgetType {
     makeEditableWidget(container, view, this.revealFrom, this.revealTo, {
       cursorFrom: this.cursorFrom,
       cursorTo: this.cursorTo,
+      positionFromEvent: () => this.cursorFrom,
     });
 
     const fallback = document.createElement("pre");
