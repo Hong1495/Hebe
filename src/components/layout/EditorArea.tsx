@@ -274,7 +274,7 @@ export function EditorArea({ onEditorViewReady }: Props) {
       <div className="flex-1 overflow-hidden">
         <HybridEditor
           mdPath={currentFilePath}
-          key={`${activeTabIndex}-${activeTab?.path ?? "new"}-${sourceMode ? "source" : "hybrid"}`}
+          key={`${activeTabIndex}-${activeTab?.path ?? "new"}`}
           initialContent={currentContent}
           onContentChange={handleContentChange}
           onNewDocument={() => openNewTab("")}

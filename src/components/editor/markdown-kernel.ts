@@ -92,6 +92,8 @@ export interface MarkdownLineReplacement {
   to: number;
   marker?: string;
   checked?: boolean | null;
+  checkFrom?: number;
+  checkTo?: number;
 }
 
 export interface MarkdownInlineDecoration extends InlineSpan {}
@@ -580,12 +582,15 @@ function scanPlainSourceLine(line: SourceLine, revealed: boolean): MarkdownLineD
     classes.push("md-list-line");
     if (!revealed) {
       const checkbox = listMatch[4]?.match(/\[([ xX])\]/)?.[1];
+      const checkboxOffset = checkbox ? listMatch[0].indexOf("[") : -1;
       replacements.push({
         kind: "listMarker",
         from: line.from + listMatch[1].length,
         to: line.from + listMatch[0].length,
         marker: /^\d/.test(listMatch[2]) ? listMatch[2] : "bullet",
         checked: checkbox ? checkbox.toLowerCase() === "x" : null,
+        checkFrom: checkboxOffset >= 0 ? line.from + checkboxOffset + 1 : undefined,
+        checkTo: checkboxOffset >= 0 ? line.from + checkboxOffset + 2 : undefined,
       });
     }
   }

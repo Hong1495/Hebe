@@ -76,24 +76,59 @@ interface DecoSpec {
 class ListMarkerWidget extends WidgetType {
   private readonly marker: string;
   private readonly checked: boolean | null;
+  private readonly checkFrom: number | null;
+  private readonly checkTo: number | null;
 
-  constructor(marker: string, checked: boolean | null = null) {
+  constructor(
+    marker: string,
+    checked: boolean | null = null,
+    checkFrom: number | null = null,
+    checkTo: number | null = null,
+  ) {
     super();
     this.marker = marker;
     this.checked = checked;
+    this.checkFrom = checkFrom;
+    this.checkTo = checkTo;
   }
 
   override eq(other: ListMarkerWidget): boolean {
-    return other.marker === this.marker && other.checked === this.checked;
+    return (
+      other.marker === this.marker &&
+      other.checked === this.checked &&
+      other.checkFrom === this.checkFrom &&
+      other.checkTo === this.checkTo
+    );
   }
 
-  toDOM(): HTMLElement {
+  toDOM(view: EditorView): HTMLElement {
     const span = document.createElement("span");
     span.className = "cm-list-marker";
     if (this.checked !== null) {
       span.classList.add(this.checked ? "is-checked" : "is-unchecked");
+      span.role = "checkbox";
+      span.ariaChecked = String(this.checked);
+      span.tabIndex = 0;
     }
     span.textContent = this.checked === null ? this.marker : this.checked ? "☑" : "☐";
+    if (this.checked !== null && this.checkFrom !== null && this.checkTo !== null) {
+      const toggle = (event: Event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        view.dispatch({
+          changes: {
+            from: this.checkFrom ?? 0,
+            to: this.checkTo ?? 0,
+            insert: this.checked ? " " : "x",
+          },
+        });
+        view.focus();
+      };
+      span.addEventListener("mousedown", toggle);
+      span.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") toggle(event);
+      });
+    }
     return span;
   }
 
@@ -170,6 +205,8 @@ function addReplacement(replacement: MarkdownLineReplacement, decorations: DecoS
       widget: new ListMarkerWidget(
         replacement.marker === "bullet" ? "•" : (replacement.marker ?? ""),
         replacement.checked ?? null,
+        replacement.checkFrom ?? null,
+        replacement.checkTo ?? null,
       ),
     }),
   });

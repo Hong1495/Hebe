@@ -86,6 +86,8 @@ describe("markdown kernel", () => {
       kind: "listMarker",
       marker: "bullet",
       checked: true,
+      checkFrom: "# Title\n- [".length,
+      checkTo: "# Title\n- [x".length,
     });
     expect(lines[5].classes).toEqual(["md-code-block-line"]);
     expect(lines[5].inlineSpans).toEqual([]);

@@ -3,7 +3,7 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
-import { Annotation, EditorState, type Extension } from "@codemirror/state";
+import { Annotation, Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { useEffect, useRef, useState } from "react";
@@ -39,6 +39,12 @@ const markdownHighlightStyle = HighlightStyle.define([
 
 const externalContentSync = Annotation.define<boolean>();
 
+function hybridPreviewExtensions(sourceMode: boolean, mdPath: string | null): Extension[] {
+  return sourceMode
+    ? []
+    : [inlinePreviewPlugin, clickRevealPlugin, blockWidgetPlugin(mdPath ?? null)];
+}
+
 interface HybridEditorProps {
   initialContent?: string;
   onContentChange?: (content: string) => void;
@@ -66,10 +72,17 @@ export function HybridEditor({
 }: HybridEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const previewCompartmentRef = useRef<Compartment | null>(null);
   const [isReady, setIsReady] = useState(false);
+
+  if (!previewCompartmentRef.current) {
+    previewCompartmentRef.current = new Compartment();
+  }
 
   useEffect(() => {
     if (!containerRef.current || viewRef.current) return;
+    const previewCompartment = previewCompartmentRef.current;
+    if (!previewCompartment) return;
 
     const updateContent = EditorView.updateListener.of((update) => {
       const externalUpdate = update.transactions.some((tr) => tr.annotation(externalContentSync));
@@ -135,9 +148,7 @@ export function HybridEditor({
       editorFocusPlugin,
       editorFocusedField,
       previewRevealRangeField,
-      ...(sourceMode
-        ? []
-        : [inlinePreviewPlugin, clickRevealPlugin, blockWidgetPlugin(mdPath ?? null)]),
+      previewCompartment.of(hybridPreviewExtensions(sourceMode, mdPath ?? null)),
 
       pasteImagePlugin(mdPath ?? null),
 
@@ -171,6 +182,15 @@ export function HybridEditor({
     if (!dom) return;
     dom.classList.toggle("cm-typewriter-mode", typewriterMode);
   }, [typewriterMode]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    const previewCompartment = previewCompartmentRef.current;
+    if (!view || !previewCompartment || !isReady) return;
+    view.dispatch({
+      effects: previewCompartment.reconfigure(hybridPreviewExtensions(sourceMode, mdPath ?? null)),
+    });
+  }, [sourceMode, mdPath, isReady]);
 
   useEffect(() => {
     if (!viewRef.current || !isReady) return;
