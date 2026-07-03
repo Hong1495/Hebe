@@ -344,6 +344,7 @@ export const clickRevealPlugin = (() => {
         selection: { anchor: click.pos, head: click.pos },
         effects: setPreviewRevealRange.of({ from: click.lineFrom, to: click.lineTo }),
       });
+      refineCursorAfterReveal(view, event.clientX, event.clientY, click.lineFrom, click.lineTo);
       view.focus();
       return true;
     },
@@ -361,13 +362,80 @@ function clickPositionFromEvent(event: MouseEvent, view: EditorView): ClickPosit
   const coordsPos = view.posAtCoords({ x: event.clientX, y: event.clientY }, false);
 
   if (targetLine) {
-    const pos = visualPositionInLine(event, view, targetLine.element, targetLine.line);
+    const pos = visualPositionInLine(
+      event.clientX,
+      event.clientY,
+      view,
+      targetLine.element,
+      targetLine.line,
+    );
     return { pos, lineFrom: targetLine.line.from, lineTo: targetLine.line.to };
   }
 
   if (coordsPos === null) return null;
   const line = view.state.doc.lineAt(coordsPos);
   return { pos: coordsPos, lineFrom: line.from, lineTo: line.to };
+}
+
+function refineCursorAfterReveal(
+  view: EditorView,
+  clientX: number,
+  clientY: number,
+  lineFrom: number,
+  lineTo: number,
+): void {
+  view.requestMeasure({
+    read(measuringView) {
+      return positionFromCoordinates(measuringView, clientX, clientY, lineFrom, lineTo);
+    },
+    write(pos, measuringView) {
+      if (pos === null) return;
+      const line = measuringView.state.doc.lineAt(
+        Math.min(lineFrom, measuringView.state.doc.length),
+      );
+      const cursor = clampInt(pos, line.from, line.to);
+      const selection = measuringView.state.selection.main;
+      if (selection.empty && selection.from === cursor) return;
+      measuringView.dispatch({ selection: { anchor: cursor, head: cursor } });
+    },
+  });
+}
+
+function positionFromCoordinates(
+  view: EditorView,
+  clientX: number,
+  clientY: number,
+  lineFrom: number,
+  lineTo: number,
+): number | null {
+  const doc = view.state.doc;
+  if (doc.length === 0) return 0;
+
+  const targetLine = doc.lineAt(Math.min(lineFrom, doc.length));
+  const coordsPos = view.posAtCoords({ x: clientX, y: clientY }, false);
+  if (coordsPos !== null) {
+    const coordsLine = doc.lineAt(clampInt(coordsPos, 0, doc.length));
+    if (coordsLine.number === targetLine.number) {
+      return clampInt(coordsPos, targetLine.from, targetLine.to);
+    }
+  }
+
+  const lineElement = lineElementAtPosition(view, targetLine.from);
+  if (lineElement) {
+    return visualPositionInLine(clientX, clientY, view, lineElement, targetLine);
+  }
+
+  return clampInt(lineFrom, targetLine.from, Math.min(lineTo, targetLine.to));
+}
+
+function lineElementAtPosition(view: EditorView, pos: number): HTMLElement | null {
+  try {
+    const dom = view.domAtPos(pos);
+    const element = dom.node instanceof Element ? dom.node : dom.node.parentElement;
+    return element?.closest(".cm-line") as HTMLElement | null;
+  } catch {
+    return null;
+  }
 }
 
 function lineFromEventTarget(event: MouseEvent, view: EditorView) {
@@ -390,21 +458,22 @@ function eventTargetElement(event: MouseEvent): Element | null {
 }
 
 function visualPositionInLine(
-  event: MouseEvent,
+  clientX: number,
+  clientY: number,
   view: EditorView,
   element: HTMLElement,
   line: { from: number; to: number },
 ): number {
   const visibleBounds = visibleTextBounds(element);
   if (visibleBounds) {
-    if (event.clientX < visibleBounds.left - 1) return line.from;
-    if (event.clientX > visibleBounds.right + 1) return line.to;
+    if (clientX < visibleBounds.left - 1) return line.from;
+    if (clientX > visibleBounds.right + 1) return line.to;
   }
 
-  const caretPos = domCaretPositionFromPoint(event, view, line.from, line.to);
+  const caretPos = domCaretPositionFromPoint(clientX, clientY, view, line.from, line.to);
   if (caretPos !== null) return caretPos;
 
-  const coordsPos = view.posAtCoords({ x: event.clientX, y: event.clientY }, false);
+  const coordsPos = view.posAtCoords({ x: clientX, y: clientY }, false);
   if (coordsPos !== null) {
     const coordsLine = view.state.doc.lineAt(coordsPos);
     if (coordsLine.from === line.from && coordsLine.to === line.to) {
@@ -412,11 +481,12 @@ function visualPositionInLine(
     }
   }
 
-  return approximatePositionInLine(event, element, line.from, line.to);
+  return approximatePositionInLine(clientX, element, line.from, line.to);
 }
 
 function domCaretPositionFromPoint(
-  event: MouseEvent,
+  clientX: number,
+  clientY: number,
   view: EditorView,
   from: number,
   to: number,
@@ -427,7 +497,7 @@ function domCaretPositionFromPoint(
   };
 
   try {
-    const caret = doc.caretPositionFromPoint?.(event.clientX, event.clientY);
+    const caret = doc.caretPositionFromPoint?.(clientX, clientY);
     if (caret) {
       const pos = view.posAtDOM(caret.offsetNode, caret.offset);
       if (pos >= from && pos <= to) return clampInt(pos, from, to);
@@ -437,7 +507,7 @@ function domCaretPositionFromPoint(
   }
 
   try {
-    const range = doc.caretRangeFromPoint?.(event.clientX, event.clientY);
+    const range = doc.caretRangeFromPoint?.(clientX, clientY);
     if (range) {
       const pos = view.posAtDOM(range.startContainer, range.startOffset);
       if (pos >= from && pos <= to) return clampInt(pos, from, to);
@@ -476,7 +546,7 @@ function visibleTextBounds(element: HTMLElement): { left: number; right: number 
 }
 
 function approximatePositionInLine(
-  event: MouseEvent,
+  clientX: number,
   element: HTMLElement,
   from: number,
   to: number,
@@ -484,7 +554,7 @@ function approximatePositionInLine(
   const bounds = visibleTextBounds(element);
   const rect = bounds ?? element.getBoundingClientRect();
   const width = Math.max(0, rect.right - rect.left);
-  const ratio = width > 0 ? clamp((event.clientX - rect.left) / width, 0, 1) : 0;
+  const ratio = width > 0 ? clamp((clientX - rect.left) / width, 0, 1) : 0;
   return from + Math.round(ratio * Math.max(0, to - from));
 }
 
