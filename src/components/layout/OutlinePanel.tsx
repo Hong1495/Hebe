@@ -38,9 +38,7 @@ export function OutlinePanel({ onJump }: OutlinePanelProps) {
           <ListTree size={14} />
           Outline
         </span>
-        <span className="panel-count">
-          {headings.length}
-        </span>
+        <span className="panel-count">{headings.length}</span>
       </div>
 
       {headings.length === 0 ? (

@@ -1,11 +1,9 @@
 import { type EditorState, StateEffect, StateField, type Transaction } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
 import {
-  type FenceMarker,
   type InlineSpanKind,
-  isFenceCloser,
-  readFenceOpener,
-  scanInlineMarkdownSpans,
+  type MarkdownLineReplacement,
+  scanMarkdownLineDecorations,
 } from "../markdown-kernel";
 
 export interface PreviewRevealRange {
@@ -69,8 +67,6 @@ export function previewDecorationsNeedRefresh(transaction: Transaction): boolean
   );
 }
 
-const MAX_INLINE_SCAN_LENGTH = 6000;
-
 interface DecoSpec {
   from: number;
   to: number;
@@ -125,110 +121,18 @@ function hideMarkDeco(state: EditorState): DecorationSet {
     for (let i = fromLine; i <= toLine; i++) revealLines.add(i);
   }
 
-  let activeFence: FenceMarker | null = null;
-
-  for (let lineNo = 1; lineNo <= state.doc.lines; lineNo++) {
-    const line = state.doc.line(lineNo);
-    const revealed = revealLines.has(lineNo);
-
-    if (activeFence) {
-      scanFencedCodeLine(line.text, line.from, decorations);
-      if (isFenceCloser(line.text, activeFence)) activeFence = null;
-      continue;
+  for (const line of scanMarkdownLineDecorations(state.doc.toString(), revealLines)) {
+    for (const className of line.classes) addLineClass(line.lineFrom, className, decorations);
+    for (const replacement of line.replacements) addReplacement(replacement, decorations);
+    for (const span of line.inlineSpans) {
+      addMark(span.contentFrom, span.contentTo, inlineClassName(span.kind), decorations);
     }
-
-    const fence = readFenceOpener(line.text);
-    if (fence) {
-      scanFencedCodeLine(line.text, line.from, decorations);
-      activeFence = fence;
-      continue;
-    }
-
-    scanLineDecorations(line.text, line.from, revealed, decorations);
   }
 
   return Decoration.set(
     decorations.map((d) => d.deco.range(d.from, d.to)),
     true,
   );
-}
-
-function scanFencedCodeLine(text: string, lineFrom: number, decorations: DecoSpec[]): void {
-  addLineClass(lineFrom, "md-code-block-line", decorations);
-  if (readFenceOpener(text)) {
-    addLineClass(lineFrom, "md-code-fence-line", decorations);
-  }
-}
-
-function scanLineDecorations(
-  text: string,
-  lineFrom: number,
-  revealed: boolean,
-  decorations: DecoSpec[],
-): void {
-  const heading = text.match(/^(#{1,6})([ \t]+)(.*)$/);
-  if (heading) {
-    const level = heading[1].length;
-    addLineClass(lineFrom, `md-heading md-heading-${level}`, decorations);
-    if (!revealed) {
-      addReplace(lineFrom, lineFrom + heading[1].length + heading[2].length, decorations);
-    }
-  }
-
-  if (/^\s{0,3}>/.test(text)) {
-    addLineClass(lineFrom, "md-quote-line", decorations);
-    if (!revealed) {
-      const quoteMatch = text.match(/^(\s{0,3}(?:>[ \t]?)+)/);
-      if (quoteMatch) addReplace(lineFrom, lineFrom + quoteMatch[1].length, decorations);
-    }
-  }
-
-  const listMatch = text.match(/^(\s*)([-+*]|\d+[.)])([ \t]+)(\[[ xX]\][ \t]+)?/);
-  if (listMatch) {
-    addLineClass(lineFrom, "md-list-line", decorations);
-    if (!revealed) {
-      const markerStart = lineFrom + listMatch[1].length;
-      const markerEnd = lineFrom + listMatch[0].length;
-      const checkbox = listMatch[4]?.match(/\[([ xX])\]/)?.[1];
-      const marker = /^\d/.test(listMatch[2]) ? listMatch[2] : "•";
-      decorations.push({
-        from: markerStart,
-        to: markerEnd,
-        deco: Decoration.replace({
-          widget: new ListMarkerWidget(marker, checkbox ? checkbox.toLowerCase() === "x" : null),
-        }),
-      });
-    }
-  }
-
-  if (readFenceOpener(text)) {
-    addLineClass(lineFrom, "md-code-fence-line", decorations);
-  }
-
-  if (/^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/.test(text)) {
-    addLineClass(lineFrom, "md-rule-line", decorations);
-  }
-
-  if (text.length <= MAX_INLINE_SCAN_LENGTH) {
-    scanInlineMarkdown(text, lineFrom, revealed, decorations);
-  }
-}
-
-function scanInlineMarkdown(
-  text: string,
-  lineFrom: number,
-  revealed: boolean,
-  decorations: DecoSpec[],
-): void {
-  for (const span of scanInlineMarkdownSpans(text)) {
-    const contentFrom = lineFrom + span.contentFrom;
-    const contentTo = lineFrom + span.contentTo;
-    addMark(contentFrom, contentTo, inlineClassName(span.kind), decorations);
-    if (!revealed) {
-      addReplace(lineFrom + span.openingFrom, lineFrom + span.openingTo, decorations);
-      addReplace(lineFrom + span.closingFrom, lineFrom + span.closingTo, decorations);
-    }
-  }
 }
 
 function inlineClassName(kind: InlineSpanKind): string {
@@ -250,6 +154,25 @@ function addLineClass(from: number, className: string, decorations: DecoSpec[]):
 function addMark(from: number, to: number, className: string, decorations: DecoSpec[]): void {
   if (from >= to) return;
   decorations.push({ from, to, deco: Decoration.mark({ class: className }) });
+}
+
+function addReplacement(replacement: MarkdownLineReplacement, decorations: DecoSpec[]): void {
+  if (replacement.kind === "hide") {
+    addReplace(replacement.from, replacement.to, decorations);
+    return;
+  }
+
+  if (replacement.from >= replacement.to) return;
+  decorations.push({
+    from: replacement.from,
+    to: replacement.to,
+    deco: Decoration.replace({
+      widget: new ListMarkerWidget(
+        replacement.marker === "bullet" ? "•" : (replacement.marker ?? ""),
+        replacement.checked ?? null,
+      ),
+    }),
+  });
 }
 
 function addReplace(from: number, to: number, decorations: DecoSpec[]): void {

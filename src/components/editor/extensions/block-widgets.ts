@@ -1,24 +1,13 @@
 import { LanguageDescription } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
-import { type EditorState, StateField, type Text } from "@codemirror/state";
+import { type EditorState, StateField } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
 import { highlightCode, tags as highlightTags, tagHighlighter } from "@lezer/highlight";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import katex from "katex";
 import { isTauriRuntime } from "../../../lib/ipc";
 import { dirname } from "../../../lib/path";
-import {
-  getFenceLanguage,
-  isFenceCloser,
-  isMermaidLanguage,
-  isTableDelimiter,
-  isTableRow,
-  type ParsedTable,
-  parseImageLine,
-  parseMarkdownTable,
-  readFenceOpener,
-  tableCellSpans,
-} from "../markdown-kernel";
+import { type ParsedTable, parseMarkdownBlocks, tableCellSpans } from "../markdown-kernel";
 import {
   editorFocusedField,
   previewDecorationsNeedRefresh,
@@ -488,111 +477,76 @@ function formatWidgetError(error: unknown): string {
   }
 }
 
-interface BlockRange {
-  from: number;
-  to: number;
-  endLine: number;
-  source: string;
-}
-
-const MAX_BLOCK_SCAN_LINES = 500;
-const MAX_INLINE_MATH_SCAN_LENGTH = 6000;
-
 function blockDecorations(state: EditorState, mdPath: string | null): DecorationSet {
   const widgets: { from: number; to: number; widget: Decoration }[] = [];
-  const doc = state.doc;
-  const scannedLines = new Set<number>();
   const revealRange = state.field(previewRevealRangeField, false) ?? null;
 
-  for (let lineNo = 1; lineNo <= doc.lines; lineNo++) {
-    if (scannedLines.has(lineNo)) continue;
-    const line = doc.line(lineNo);
-    const text = line.text;
+  for (const block of parseMarkdownBlocks(state.doc.toString())) {
+    const revealFrom = block.kind === "inlineMath" ? block.lineFrom : block.from;
+    const revealTo = block.kind === "inlineMath" ? block.lineTo : block.to;
+    if (rangeIsRevealed(state, revealRange, revealFrom, revealTo)) continue;
 
-    const fencedBlock = readFencedBlock(doc, lineNo);
-    if (fencedBlock) {
-      markLines(scannedLines, lineNo, fencedBlock.endLine);
-      const language = getFenceLanguage(text);
-      if (!rangeIsRevealed(state, revealRange, fencedBlock.from, fencedBlock.to)) {
-        const code = getInnerBlockSource(doc, lineNo, fencedBlock.endLine);
+    switch (block.kind) {
+      case "fencedCode":
         widgets.push({
-          from: fencedBlock.from,
-          to: fencedBlock.to,
+          from: block.from,
+          to: block.to,
           widget: Decoration.replace({
-            widget: isMermaidLanguage(language)
-              ? new MermaidWidget(code, fencedBlock.from, fencedBlock.to)
-              : new CodeBlockWidget(code, language, fencedBlock.from, fencedBlock.to),
+            widget: block.isMermaid
+              ? new MermaidWidget(block.content, block.from, block.to)
+              : new CodeBlockWidget(block.content, block.language, block.from, block.to),
             block: true,
           }),
         });
-      }
-      lineNo = fencedBlock.endLine;
-      continue;
-    }
+        break;
 
-    const mathBlock = readMathBlock(doc, lineNo);
-    if (mathBlock) {
-      markLines(scannedLines, lineNo, mathBlock.endLine);
-      if (!rangeIsRevealed(state, revealRange, mathBlock.from, mathBlock.to)) {
+      case "mathBlock":
         widgets.push({
-          from: mathBlock.from,
-          to: mathBlock.to,
+          from: block.from,
+          to: block.to,
           widget: Decoration.replace({
-            widget: new MathWidget(mathBlock.source, true, mathBlock.from, mathBlock.to),
+            widget: new MathWidget(block.content, true, block.from, block.to),
             block: true,
           }),
         });
-      }
-      lineNo = mathBlock.endLine;
-      continue;
-    }
+        break;
 
-    const tableBlock = readTableBlock(doc, lineNo);
-    if (tableBlock) {
-      markLines(scannedLines, lineNo, tableBlock.endLine);
-      const table = parseMarkdownTable(tableBlock.source);
-      if (table && !rangeIsRevealed(state, revealRange, tableBlock.from, tableBlock.to)) {
+      case "table":
         widgets.push({
-          from: tableBlock.from,
-          to: tableBlock.to,
+          from: block.from,
+          to: block.to,
           widget: Decoration.replace({
-            widget: new TableWidget(table, tableBlock.from, tableBlock.to),
+            widget: new TableWidget(block.table, block.from, block.to),
             block: true,
           }),
         });
-      }
-      lineNo = tableBlock.endLine;
-      continue;
-    }
+        break;
 
-    const image = parseImageLine(text);
-    if (image && !rangeIsRevealed(state, revealRange, line.from, line.to)) {
-      widgets.push({
-        from: line.from,
-        to: line.to,
-        widget: Decoration.replace({
-          widget: new ImageWidget(
-            image.alt,
-            resolveImageSrc(image.src, mdPath),
-            line.from,
-            line.to,
-          ),
-          block: true,
-        }),
-      });
-      continue;
-    }
+      case "image":
+        widgets.push({
+          from: block.from,
+          to: block.to,
+          widget: Decoration.replace({
+            widget: new ImageWidget(
+              block.alt,
+              resolveImageSrc(block.src, mdPath),
+              block.from,
+              block.to,
+            ),
+            block: true,
+          }),
+        });
+        break;
 
-    if (
-      text.length <= MAX_INLINE_MATH_SCAN_LENGTH &&
-      !rangeIsRevealed(state, revealRange, line.from, line.to)
-    ) {
-      scanInlineMath(
-        text,
-        line.from,
-        widgets,
-        widgets.map((w) => ({ from: w.from, to: w.to })),
-      );
+      case "inlineMath":
+        widgets.push({
+          from: block.from,
+          to: block.to,
+          widget: Decoration.replace({
+            widget: new MathWidget(block.latex, false, block.from, block.to),
+          }),
+        });
+        break;
     }
   }
 
@@ -619,98 +573,6 @@ function rangeIsRevealed(
   );
 }
 
-function markLines(lines: Set<number>, startLine: number, endLine: number): void {
-  for (let lineNo = startLine; lineNo <= endLine; lineNo++) {
-    lines.add(lineNo);
-  }
-}
-
-function readFencedBlock(doc: Text, startLine: number): BlockRange | null {
-  const line = doc.line(startLine);
-  const fence = readFenceOpener(line.text);
-  if (!fence) return null;
-
-  for (let lineNo = startLine + 1; lineNo <= doc.lines; lineNo++) {
-    const closeLine = doc.line(lineNo);
-    if (isFenceCloser(closeLine.text, fence)) {
-      return {
-        from: line.from,
-        to: closeLine.to,
-        endLine: lineNo,
-        source: doc.sliceString(line.from, closeLine.to),
-      };
-    }
-  }
-
-  const lastLine = doc.line(doc.lines);
-  return {
-    from: line.from,
-    to: lastLine.to,
-    endLine: doc.lines,
-    source: doc.sliceString(line.from, lastLine.to),
-  };
-}
-
-function getInnerBlockSource(doc: Text, startLine: number, endLine: number): string {
-  const lines: string[] = [];
-  for (let lineNo = startLine + 1; lineNo < endLine; lineNo++) {
-    lines.push(doc.line(lineNo).text);
-  }
-  return lines.join("\n");
-}
-
-function readMathBlock(doc: Text, startLine: number): BlockRange | null {
-  const line = doc.line(startLine);
-  const trimmed = line.text.trim();
-  const singleLine = trimmed.match(/^\$\$(.+?)\$\$$/);
-  if (singleLine) {
-    return {
-      from: line.from,
-      to: line.to,
-      endLine: startLine,
-      source: singleLine[1].trim(),
-    };
-  }
-
-  if (trimmed !== "$$") return null;
-
-  const lastLine = Math.min(doc.lines, startLine + MAX_BLOCK_SCAN_LINES);
-  for (let lineNo = startLine + 1; lineNo <= lastLine; lineNo++) {
-    const closeLine = doc.line(lineNo);
-    if (closeLine.text.trim() === "$$") {
-      return {
-        from: line.from,
-        to: closeLine.to,
-        endLine: lineNo,
-        source: getInnerBlockSource(doc, startLine, lineNo),
-      };
-    }
-  }
-
-  return null;
-}
-
-function readTableBlock(doc: Text, startLine: number): BlockRange | null {
-  if (startLine + 1 > doc.lines) return null;
-
-  const headerLine = doc.line(startLine);
-  const delimiterLine = doc.line(startLine + 1);
-  if (!isTableRow(headerLine.text) || !isTableDelimiter(delimiterLine.text)) return null;
-
-  let endLine = startLine + 1;
-  while (endLine + 1 <= doc.lines && isTableRow(doc.line(endLine + 1).text)) {
-    endLine += 1;
-  }
-
-  const lastLine = doc.line(endLine);
-  return {
-    from: headerLine.from,
-    to: lastLine.to,
-    endLine,
-    source: doc.sliceString(headerLine.from, lastLine.to),
-  };
-}
-
 function resolveImageSrc(src: string, mdPath: string | null): string {
   if (/^(?:[a-z][a-z\d+.-]*:|#)/i.test(src)) return src;
   if (!isTauriRuntime()) return src;
@@ -731,35 +593,6 @@ function joinFilesystemPath(basePath: string, childPath: string): string {
 
 function isAbsolutePath(path: string): boolean {
   return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path);
-}
-
-interface Span {
-  from: number;
-  to: number;
-}
-
-function scanInlineMath(
-  text: string,
-  baseOffset: number,
-  widgets: { from: number; to: number; widget: Decoration }[],
-  existingSpans: Span[],
-): void {
-  const inlineMathRe = /(?<!\\)\$([^$\n]+?)(?<!\\)\$/g;
-  let match: RegExpExecArray | null;
-  while ((match = inlineMathRe.exec(text)) !== null) {
-    const from = baseOffset + match.index;
-    const to = from + match[0].length;
-
-    // Skip if this span overlaps with an existing block math widget
-    const overlaps = existingSpans.some((s) => from < s.to && to > s.from);
-    if (overlaps) continue;
-
-    widgets.push({
-      from,
-      to,
-      widget: Decoration.replace({ widget: new MathWidget(match[1], false, from, to) }),
-    });
-  }
 }
 
 export const blockWidgetPlugin = (mdPath: string | null) =>

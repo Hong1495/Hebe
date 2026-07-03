@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import {
   getSystemTheme,
-  SYSTEM_DARK_QUERY,
   type ResolvedTheme,
+  SYSTEM_DARK_QUERY,
   type ThemePreference,
 } from "./theme";
 

@@ -43,7 +43,5 @@ export function relativePath(path: string, basePath: string): string {
   if (pathLower === baseLower) return "";
   if (!pathLower.startsWith(baseLower)) return basename(normalizedPath);
 
-  return normalizedPath
-    .slice(normalizedBase.length)
-    .replace(/^[\\/]+/, "");
+  return normalizedPath.slice(normalizedBase.length).replace(/^[\\/]+/, "");
 }

@@ -14,11 +14,11 @@ Hebe is built around a few rules:
   theme-aware, and visually unified with the editor background.
 - macOS and Windows behaviors should be native where possible. Commands live in
   the system menu, not in oversized in-app toolbars.
-- Sidebars are optional and collapsed by default. File navigation and outline
-  panels are resizable supporting tools, not permanent layout weight.
+- The outline panel is optional and collapsed by default. It is a resizable
+  supporting tool, not permanent layout weight.
 - Markdown files can be opened from the dialog, recent-file restore, OS open
   events, and drag-and-drop.
-- Settings use a standard modal dialog and never take over the file sidebar.
+- Settings use a standard modal dialog and never take over the editor surface.
 - Editing uses a "preview until touched" model: rendered Markdown stays readable,
   and clicking a line or block reveals the source needed for direct editing.
 
@@ -28,17 +28,17 @@ Hebe is built around a few rules:
 src/
   App.tsx                         App shell, theme sync, drag/open events
   stores/app-store.ts             Zustand state: tabs, layout, theme, zoom, recent files
-  components/layout/              Tab bar, editor area, sidebars, status bar, settings
+  components/layout/              Tab bar, editor area, outline panel, status bar, settings
   components/editor/HybridEditor  CodeMirror 6 host and extension wiring
   components/editor/extensions/   Markdown preview engine and block widgets
   lib/ipc.ts                      Typed Tauri command wrappers
 src-tauri/
   src/lib.rs                      Tauri builder, native menu, window lifecycle, OS open events
-  src/commands/                   File IO, folders, export, search, image paste, reveal
+  src/commands/                   File IO, export, image paste, outline extraction
 ```
 
 The frontend owns editor state and interaction. The Rust side owns native shell
-integration, filesystem access, export/search commands, app menus, and macOS
+integration, filesystem access, export commands, image paste, app menus, and macOS
 open/reopen behavior.
 
 ```mermaid
@@ -62,12 +62,9 @@ flowchart TB
   subgraph Layout["UI Layout"]
     TabBar["TabBar"]
     EditorArea["EditorArea"]
-    Sidebar["File Sidebar"]
     Outline["Outline Panel"]
     StatusBar["Status Bar"]
     Settings["Settings Dialog"]
-    QuickOpen["Quick Open"]
-    GlobalSearch["Global Search"]
   end
 
   subgraph Kernel["Markdown Kernel"]
@@ -95,13 +92,10 @@ flowchart TB
 
   AppShell --> TabBar
   AppShell --> EditorArea
-  AppShell --> Sidebar
   AppShell --> Outline
   AppShell --> StatusBar
   AppShell --> Settings
 
-  EditorArea --> QuickOpen
-  EditorArea --> GlobalSearch
   EditorArea --> HybridEditor
   EditorArea -->|read / write / export| IPC
 

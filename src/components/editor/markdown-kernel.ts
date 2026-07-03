@@ -36,6 +36,86 @@ export interface TableCellSpan {
   contentTo: number;
 }
 
+export interface MarkdownBlockBase {
+  from: number;
+  to: number;
+  startLine: number;
+  endLine: number;
+  source: string;
+}
+
+export interface FencedCodeBlock extends MarkdownBlockBase {
+  kind: "fencedCode";
+  language: string | null;
+  info: string;
+  content: string;
+  contentFrom: number;
+  contentTo: number;
+  isMermaid: boolean;
+}
+
+export interface MathBlock extends MarkdownBlockBase {
+  kind: "mathBlock";
+  content: string;
+  contentFrom: number;
+  contentTo: number;
+}
+
+export interface TableBlock extends MarkdownBlockBase {
+  kind: "table";
+  table: ParsedTable;
+}
+
+export interface ImageBlock extends MarkdownBlockBase {
+  kind: "image";
+  alt: string;
+  src: string;
+}
+
+export interface InlineMathSpan {
+  kind: "inlineMath";
+  from: number;
+  to: number;
+  contentFrom: number;
+  contentTo: number;
+  latex: string;
+  lineNumber: number;
+  lineFrom: number;
+  lineTo: number;
+}
+
+export type MarkdownBlock = FencedCodeBlock | MathBlock | TableBlock | ImageBlock | InlineMathSpan;
+
+export interface MarkdownLineReplacement {
+  kind: "hide" | "listMarker";
+  from: number;
+  to: number;
+  marker?: string;
+  checked?: boolean | null;
+}
+
+export interface MarkdownInlineDecoration extends InlineSpan {}
+
+export interface MarkdownLineDecoration {
+  lineNumber: number;
+  lineFrom: number;
+  lineTo: number;
+  classes: string[];
+  replacements: MarkdownLineReplacement[];
+  inlineSpans: MarkdownInlineDecoration[];
+}
+
+interface SourceLine {
+  number: number;
+  from: number;
+  to: number;
+  text: string;
+}
+
+const MAX_BLOCK_SCAN_LINES = 500;
+const MAX_INLINE_SCAN_LENGTH = 6000;
+const MAX_INLINE_MATH_SCAN_LENGTH = 6000;
+
 export function readFenceOpener(text: string): FenceMarker | null {
   const match = text.match(/^[ \t]{0,3}(`{3,}|~{3,})(.*)$/);
   if (!match) return null;
@@ -177,6 +257,376 @@ export function scanInlineMarkdownSpans(text: string): InlineSpan[] {
   scanSingleEmphasis(text, "_", spans, protectedSpans);
 
   return spans.sort((a, b) => a.from - b.from || a.to - b.to);
+}
+
+export function parseMarkdownBlocks(source: string): MarkdownBlock[] {
+  const lines = splitSourceLines(source);
+  const blocks: MarkdownBlock[] = [];
+
+  for (let index = 0; index < lines.length; index++) {
+    const fencedBlock = readFencedCodeBlock(source, lines, index);
+    if (fencedBlock) {
+      blocks.push(fencedBlock);
+      index = fencedBlock.endLine - 1;
+      continue;
+    }
+
+    const mathBlock = readMathMarkdownBlock(source, lines, index);
+    if (mathBlock) {
+      blocks.push(mathBlock);
+      index = mathBlock.endLine - 1;
+      continue;
+    }
+
+    const tableBlock = readTableMarkdownBlock(source, lines, index);
+    if (tableBlock) {
+      blocks.push(tableBlock);
+      index = tableBlock.endLine - 1;
+      continue;
+    }
+
+    const imageBlock = readImageMarkdownBlock(source, lines[index]);
+    if (imageBlock) {
+      blocks.push(imageBlock);
+      continue;
+    }
+
+    if (lines[index].text.length <= MAX_INLINE_MATH_SCAN_LENGTH) {
+      blocks.push(...scanInlineMathSpans(lines[index]));
+    }
+  }
+
+  return blocks.sort((a, b) => a.from - b.from || a.to - b.to);
+}
+
+export function scanMarkdownLineDecorations(
+  source: string,
+  revealLines: ReadonlySet<number> = new Set<number>(),
+): MarkdownLineDecoration[] {
+  const lines = splitSourceLines(source);
+  const decorations: MarkdownLineDecoration[] = [];
+  let activeFence: FenceMarker | null = null;
+
+  for (const line of lines) {
+    if (activeFence) {
+      decorations.push(scanFencedSourceLine(line));
+      if (isFenceCloser(line.text, activeFence)) activeFence = null;
+      continue;
+    }
+
+    const fence = readFenceOpener(line.text);
+    if (fence) {
+      decorations.push(scanFencedSourceLine(line));
+      activeFence = fence;
+      continue;
+    }
+
+    decorations.push(scanPlainSourceLine(line, revealLines.has(line.number)));
+  }
+
+  return decorations;
+}
+
+function splitSourceLines(source: string): SourceLine[] {
+  if (source.length === 0) return [{ number: 1, from: 0, to: 0, text: "" }];
+
+  const lines: SourceLine[] = [];
+  let from = 0;
+  let number = 1;
+
+  while (from <= source.length) {
+    const newline = source.indexOf("\n", from);
+    if (newline < 0) {
+      lines.push({ number, from, to: source.length, text: source.slice(from) });
+      break;
+    }
+
+    const to = newline > from && source[newline - 1] === "\r" ? newline - 1 : newline;
+    lines.push({ number, from, to, text: source.slice(from, to) });
+    from = newline + 1;
+    number += 1;
+
+    if (from === source.length) {
+      lines.push({ number, from, to: from, text: "" });
+      break;
+    }
+  }
+
+  return lines;
+}
+
+function readFencedCodeBlock(
+  source: string,
+  lines: SourceLine[],
+  startIndex: number,
+): FencedCodeBlock | null {
+  const openLine = lines[startIndex];
+  const fence = readFenceOpener(openLine.text);
+  if (!fence) return null;
+
+  let endIndex = lines.length - 1;
+  let closeIndex = -1;
+  for (let index = startIndex + 1; index < lines.length; index++) {
+    if (isFenceCloser(lines[index].text, fence)) {
+      endIndex = index;
+      closeIndex = index;
+      break;
+    }
+  }
+
+  const contentStartIndex = startIndex + 1;
+  const contentEndIndex = closeIndex >= 0 ? closeIndex - 1 : endIndex;
+  const hasContent = contentStartIndex <= contentEndIndex;
+  const contentFrom = hasContent ? lines[contentStartIndex].from : openLine.to;
+  const contentTo = hasContent ? lines[contentEndIndex].to : openLine.to;
+  const endLine = lines[endIndex];
+  const language = getFenceLanguage(openLine.text);
+
+  return {
+    kind: "fencedCode",
+    from: openLine.from,
+    to: endLine.to,
+    startLine: openLine.number,
+    endLine: endLine.number,
+    source: source.slice(openLine.from, endLine.to),
+    language,
+    info: fence.info,
+    content: hasContent ? source.slice(contentFrom, contentTo) : "",
+    contentFrom,
+    contentTo,
+    isMermaid: isMermaidLanguage(language),
+  };
+}
+
+function readMathMarkdownBlock(
+  source: string,
+  lines: SourceLine[],
+  startIndex: number,
+): MathBlock | null {
+  const openLine = lines[startIndex];
+  const trimmed = openLine.text.trim();
+  const singleLine = trimmed.match(/^\$\$(.+?)\$\$$/);
+  if (singleLine) {
+    const contentStartInLine = openLine.text.indexOf("$$") + 2;
+    const contentEndInLine = openLine.text.lastIndexOf("$$");
+    const contentFrom = openLine.from + contentStartInLine;
+    const contentTo = openLine.from + contentEndInLine;
+    return {
+      kind: "mathBlock",
+      from: openLine.from,
+      to: openLine.to,
+      startLine: openLine.number,
+      endLine: openLine.number,
+      source: source.slice(openLine.from, openLine.to),
+      content: singleLine[1].trim(),
+      contentFrom,
+      contentTo,
+    };
+  }
+
+  if (trimmed !== "$$") return null;
+
+  const lastIndex = Math.min(lines.length - 1, startIndex + MAX_BLOCK_SCAN_LINES);
+  for (let index = startIndex + 1; index <= lastIndex; index++) {
+    const closeLine = lines[index];
+    if (closeLine.text.trim() !== "$$") continue;
+
+    const contentStartIndex = startIndex + 1;
+    const contentEndIndex = index - 1;
+    const hasContent = contentStartIndex <= contentEndIndex;
+    const contentFrom = hasContent ? lines[contentStartIndex].from : openLine.to;
+    const contentTo = hasContent ? lines[contentEndIndex].to : openLine.to;
+
+    return {
+      kind: "mathBlock",
+      from: openLine.from,
+      to: closeLine.to,
+      startLine: openLine.number,
+      endLine: closeLine.number,
+      source: source.slice(openLine.from, closeLine.to),
+      content: hasContent ? source.slice(contentFrom, contentTo) : "",
+      contentFrom,
+      contentTo,
+    };
+  }
+
+  return null;
+}
+
+function readTableMarkdownBlock(
+  source: string,
+  lines: SourceLine[],
+  startIndex: number,
+): TableBlock | null {
+  if (startIndex + 1 >= lines.length) return null;
+
+  const headerLine = lines[startIndex];
+  const delimiterLine = lines[startIndex + 1];
+  if (!isTableRow(headerLine.text) || !isTableDelimiter(delimiterLine.text)) return null;
+
+  let endIndex = startIndex + 1;
+  while (endIndex + 1 < lines.length && isTableRow(lines[endIndex + 1].text)) {
+    endIndex += 1;
+  }
+
+  const lastLine = lines[endIndex];
+  const tableSource = source.slice(headerLine.from, lastLine.to);
+  const table = parseMarkdownTable(tableSource);
+  if (!table) return null;
+
+  return {
+    kind: "table",
+    from: headerLine.from,
+    to: lastLine.to,
+    startLine: headerLine.number,
+    endLine: lastLine.number,
+    source: tableSource,
+    table,
+  };
+}
+
+function readImageMarkdownBlock(source: string, line: SourceLine): ImageBlock | null {
+  const image = parseImageLine(line.text);
+  if (!image) return null;
+  return {
+    kind: "image",
+    from: line.from,
+    to: line.to,
+    startLine: line.number,
+    endLine: line.number,
+    source: source.slice(line.from, line.to),
+    alt: image.alt,
+    src: image.src,
+  };
+}
+
+function scanInlineMathSpans(line: SourceLine): InlineMathSpan[] {
+  const spans: InlineMathSpan[] = [];
+  const { text } = line;
+  const protectedSpans = scanInlineMarkdownSpans(text).filter((span) => span.kind === "code");
+  const inlineMathRe = /(?<!\\)\$([^$\n]+?)(?<!\\)\$/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = inlineMathRe.exec(text)) !== null) {
+    const relative = { from: match.index, to: match.index + match[0].length };
+    if (spanOverlaps(relative, protectedSpans)) continue;
+
+    const from = line.from + relative.from;
+    const to = line.from + relative.to;
+    spans.push({
+      kind: "inlineMath",
+      from,
+      to,
+      contentFrom: from + 1,
+      contentTo: to - 1,
+      latex: match[1],
+      lineNumber: line.number,
+      lineFrom: line.from,
+      lineTo: line.to,
+    });
+  }
+
+  return spans;
+}
+
+function scanFencedSourceLine(line: SourceLine): MarkdownLineDecoration {
+  return {
+    lineNumber: line.number,
+    lineFrom: line.from,
+    lineTo: line.to,
+    classes: readFenceOpener(line.text)
+      ? ["md-code-block-line", "md-code-fence-line"]
+      : ["md-code-block-line"],
+    replacements: [],
+    inlineSpans: [],
+  };
+}
+
+function scanPlainSourceLine(line: SourceLine, revealed: boolean): MarkdownLineDecoration {
+  const classes: string[] = [];
+  const replacements: MarkdownLineReplacement[] = [];
+  const inlineSpans: MarkdownInlineDecoration[] = [];
+  const { text } = line;
+
+  const heading = text.match(/^(#{1,6})([ \t]+)(.*)$/);
+  if (heading) {
+    const level = heading[1].length;
+    classes.push("md-heading", `md-heading-${level}`);
+    if (!revealed) {
+      replacements.push({
+        kind: "hide",
+        from: line.from,
+        to: line.from + heading[1].length + heading[2].length,
+      });
+    }
+  }
+
+  if (/^\s{0,3}>/.test(text)) {
+    classes.push("md-quote-line");
+    if (!revealed) {
+      const quoteMatch = text.match(/^(\s{0,3}(?:>[ \t]?)+)/);
+      if (quoteMatch) {
+        replacements.push({
+          kind: "hide",
+          from: line.from,
+          to: line.from + quoteMatch[1].length,
+        });
+      }
+    }
+  }
+
+  const listMatch = text.match(/^(\s*)([-+*]|\d+[.)])([ \t]+)(\[[ xX]\][ \t]+)?/);
+  if (listMatch) {
+    classes.push("md-list-line");
+    if (!revealed) {
+      const checkbox = listMatch[4]?.match(/\[([ xX])\]/)?.[1];
+      replacements.push({
+        kind: "listMarker",
+        from: line.from + listMatch[1].length,
+        to: line.from + listMatch[0].length,
+        marker: /^\d/.test(listMatch[2]) ? listMatch[2] : "bullet",
+        checked: checkbox ? checkbox.toLowerCase() === "x" : null,
+      });
+    }
+  }
+
+  if (/^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/.test(text)) {
+    classes.push("md-rule-line");
+  }
+
+  if (text.length <= MAX_INLINE_SCAN_LENGTH) {
+    const spans = scanInlineMarkdownSpans(text).map((span) => offsetInlineSpan(span, line.from));
+    inlineSpans.push(...spans);
+    if (!revealed) {
+      for (const span of spans) {
+        replacements.push({ kind: "hide", from: span.openingFrom, to: span.openingTo });
+        replacements.push({ kind: "hide", from: span.closingFrom, to: span.closingTo });
+      }
+    }
+  }
+
+  return {
+    lineNumber: line.number,
+    lineFrom: line.from,
+    lineTo: line.to,
+    classes,
+    replacements,
+    inlineSpans,
+  };
+}
+
+function offsetInlineSpan(span: InlineSpan, offset: number): MarkdownInlineDecoration {
+  return {
+    ...span,
+    from: offset + span.from,
+    to: offset + span.to,
+    contentFrom: offset + span.contentFrom,
+    contentTo: offset + span.contentTo,
+    openingFrom: offset + span.openingFrom,
+    openingTo: offset + span.openingTo,
+    closingFrom: offset + span.closingFrom,
+    closingTo: offset + span.closingTo,
+  };
 }
 
 function rawTableCells(line: string): Array<{ text: string; from: number; to: number }> {
