@@ -196,12 +196,6 @@ pub fn run() {
                 let _ = app.emit("menu-action", action);
             }
         })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.emit("window-close-requested", ());
-            }
-        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::new().build())

@@ -153,7 +153,8 @@ function App() {
 
     const setupCloseListener = async () => {
       try {
-        unlisten = await listen("window-close-requested", async () => {
+        unlisten = await getCurrentWindow().onCloseRequested(async (event) => {
+          event.preventDefault();
           if (cancelled || windowCloseInProgressRef.current) return;
           windowCloseInProgressRef.current = true;
           try {
