@@ -16,11 +16,23 @@ pub async fn export_document(
     output_path.set_extension(ext);
     let output_path = output_path.to_string_lossy().to_string();
 
-    let mut child = std::process::Command::new("pandoc")
+    let mut command = std::process::Command::new("pandoc");
+    command
         .arg("-o")
         .arg(&output_path)
         .arg("--from=markdown")
-        .arg(format!("--to={format}"))
+        .arg(format!("--to={format}"));
+
+    if format == "pdf" {
+        command
+            .arg("--pdf-engine=xelatex")
+            .arg("-V")
+            .arg("mainfont=PingFang SC")
+            .arg("-V")
+            .arg("CJKmainfont=PingFang SC");
+    }
+
+    let mut child = command
         .stdin(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
