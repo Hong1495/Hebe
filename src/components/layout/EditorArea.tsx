@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { message, open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef } from "react";
 import { saveActiveTab } from "../../lib/document-lifecycle";
+import { prepareMarkdownForExport } from "../../lib/export-preprocess";
 import {
   exportDocument,
   getFileMtime,
@@ -98,11 +99,10 @@ export function EditorArea({ onEditorViewReady }: Props) {
       if (!exportPath) return;
 
       try {
-        const result = await exportDocument(
+        const exportContent = await prepareMarkdownForExport(
           useAppStore.getState().currentContent(),
-          exportPath,
-          format,
         );
+        const result = await exportDocument(exportContent, exportPath, format);
         await message(`Exported to:\n${result}`, { title: "Export Complete" });
       } catch (err) {
         console.error("Export failed:", err);
