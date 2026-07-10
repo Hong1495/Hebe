@@ -225,6 +225,7 @@ pub fn run() {
             commands::get_heading_outline,
             commands::export_document,
             commands::paste_image,
+            commands::render_svg_to_png_data_uri,
             hide_main_window,
         ])
         .build(tauri::generate_context!())

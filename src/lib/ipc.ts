@@ -63,6 +63,11 @@ export async function pasteImage(imageData: number[], mdPath: string): Promise<s
   return invoke<string>("paste_image", { imageData, mdPath });
 }
 
+export async function renderSvgToPngDataUri(svg: string): Promise<string> {
+  if (!isTauriRuntime()) throw new Error("SVG rendering requires Tauri runtime");
+  return invoke<string>("render_svg_to_png_data_uri", { svg });
+}
+
 export async function hideMainWindow(): Promise<void> {
   if (!isTauriRuntime()) return;
   return invoke<void>("hide_main_window");

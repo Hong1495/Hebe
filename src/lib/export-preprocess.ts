@@ -1,4 +1,5 @@
 import { parseMarkdownBlocks, type FencedCodeBlock } from "../components/editor/markdown-kernel";
+import { isTauriRuntime, renderSvgToPngDataUri } from "./ipc";
 
 export type MermaidExportRenderer = (code: string, index: number) => Promise<string>;
 
@@ -53,10 +54,20 @@ function applyMarkdownReplacements(content: string, replacements: MarkdownReplac
 
 async function renderMermaidPngDataUri(code: string, index: number): Promise<string> {
   const { default: mermaid } = await import("mermaid");
-  mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: "strict",
+    htmlLabels: false,
+    flowchart: { htmlLabels: false },
+  });
 
   const renderId = `hebe-export-mermaid-${(mermaidExportIdCounter++).toString(36)}-${index}`;
   const result = await mermaid.render(renderId, code);
+
+  if (isTauriRuntime()) {
+    return renderSvgToPngDataUri(result.svg);
+  }
+
   const size = readSvgSize(result.svg);
   return svgToPngDataUri(result.svg, size);
 }
