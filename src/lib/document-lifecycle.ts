@@ -7,39 +7,65 @@ const MARKDOWN_FILTERS = [{ name: "Markdown", extensions: ["md", "markdown", "md
 
 type DirtyChoice = "save" | "discard" | "cancel";
 
-export async function saveTabAt(index: number): Promise<boolean> {
-  if (!isTauriRuntime()) return false;
+const pendingSaves = new Map<string, Promise<boolean>>();
+export const isTabSaving = (id: string) => pendingSaves.has(id);
 
-  const tab = useAppStore.getState().tabs[index];
-  if (!tab) return true;
+export function setTabSaveError(id: string, error?: string) {
+  useAppStore.setState((state) => ({
+    tabs: state.tabs.map((tab) => (tab.id === id ? { ...tab, saveError: error } : tab)),
+  }));
+}
 
+export async function saveTabAt(
+  index: number,
+  options: { background?: boolean; copy?: boolean; overwrite?: boolean } = {},
+): Promise<boolean> {
+  if (!isTauriRuntime() || (options.background && lifecycleBusy)) return false;
+  const id = useAppStore.getState().tabs[index]?.id;
+  if (!id) return true;
+  const previous = pendingSaves.get(id);
+  if (previous) {
+    await previous;
+    const nextIndex = tabIndex(id);
+    if (nextIndex < 0) return true;
+    return saveTabAt(nextIndex, options);
+  }
+  const operation = saveSnapshot(id, options);
+  pendingSaves.set(id, operation);
   try {
-    if (tab.path) {
-      await writeMarkdownFile(tab.path, tab.content);
-      const latestIndex = useAppStore.getState().tabs.findIndex((item) => item.id === tab.id);
-      const latest = useAppStore.getState().tabs[latestIndex];
-      if (latest?.path === tab.path && latest.content === tab.content) {
-        useAppStore.getState().markTabSaved(latestIndex);
-      }
-      return true;
+    return await operation;
+  } finally {
+    pendingSaves.delete(id);
+  }
+}
+
+async function saveSnapshot(
+  id: string,
+  options: { background?: boolean; copy?: boolean; overwrite?: boolean },
+): Promise<boolean> {
+  const tab = useAppStore.getState().tabs.find((item) => item.id === id);
+  if (!tab) return true;
+  try {
+    let path = options.copy ? null : tab.path;
+    if (!path) {
+      if (options.background) return false;
+      path = await save({ filters: MARKDOWN_FILTERS, defaultPath: suggestedUntitledName(tab) });
+      if (!path) return false;
     }
-
-    const savePath = await save({
-      filters: MARKDOWN_FILTERS,
-      defaultPath: suggestedUntitledName(tab),
-    });
-    if (!savePath) return false;
-
-    await writeMarkdownFile(savePath, tab.content);
-    const latestIndex = useAppStore.getState().tabs.findIndex((item) => item.id === tab.id);
-    const latest = useAppStore.getState().tabs[latestIndex];
-    if (latest?.content === tab.content) {
-      useAppStore.getState().markTabSaved(latestIndex, savePath);
-      useAppStore.getState().addRecentFile(savePath);
+    await writeMarkdownFile(
+      path,
+      tab.content,
+      path === tab.path && !options.overwrite ? tab.savedContent : undefined,
+    );
+    const index = tabIndex(id);
+    if (index >= 0) {
+      useAppStore.getState().markTabSaved(index, path, tab.content);
+      useAppStore.getState().addRecentFile(path);
     }
     return true;
   } catch (error) {
-    await showSaveError(error);
+    setTabSaveError(id, error instanceof Error ? error.message : String(error));
+    if (!options.background) await showSaveError(error);
     return false;
   }
 }
@@ -55,12 +81,14 @@ function tabIndex(id: string): number {
 }
 
 async function settleTab(id: string): Promise<boolean> {
+  await pendingSaves.get(id);
   let index = tabIndex(id);
   const tab = useAppStore.getState().tabs[index];
   if (!tab?.dirty) return true;
   useAppStore.getState().setActiveTab(index);
   const choice = await askDirtyChoice(tab);
   if (choice === "cancel") return false;
+  await pendingSaves.get(id);
   index = tabIndex(id);
   if (index < 0) return true;
   if (choice === "save") {

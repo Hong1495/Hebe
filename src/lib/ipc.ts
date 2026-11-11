@@ -1,3 +1,4 @@
+import { inspectLongDocument } from "../components/editor/long-document";
 export const isTauriRuntime = () =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -22,9 +23,17 @@ export async function takePendingOpenFiles(): Promise<string[]> {
   return invoke<string[]>("take_pending_open_files");
 }
 
-export async function writeMarkdownFile(path: string, content: string): Promise<void> {
+export async function writeMarkdownFile(
+  path: string,
+  content: string,
+  expectedContent?: string,
+): Promise<void> {
   if (!isTauriRuntime()) throw new Error("File I/O requires Tauri runtime");
-  return invoke<void>("write_markdown_file", { path, content });
+  return invoke<void>("write_markdown_file", {
+    path,
+    content,
+    expectedContent: expectedContent ?? null,
+  });
 }
 
 export async function getFileMtime(path: string): Promise<number> {
@@ -33,29 +42,36 @@ export async function getFileMtime(path: string): Promise<number> {
 }
 
 export async function getHeadingOutline(content: string): Promise<Heading[]> {
-  if (!isTauriRuntime()) return fallbackParseHeadings(content);
-  return invoke<Heading[]>("get_heading_outline", { content });
+  return inspectLongDocument(content).headings.map(({ text, level, line }) => ({
+    text,
+    level,
+    line,
+  }));
+}
+
+export interface ExportOptions {
+  paperSize: string;
+  fontSize: number;
+  marginMm: number;
+  tableOfContents: boolean;
+  numberSections: boolean;
 }
 
 export async function exportDocument(
   content: string,
   inputPath: string,
   format: string,
+  outputPath: string,
+  options?: ExportOptions,
 ): Promise<string> {
   if (!isTauriRuntime()) throw new Error("Export requires Tauri runtime");
-  return invoke<string>("export_document", { content, inputPath, format });
-}
-
-function fallbackParseHeadings(content: string): Heading[] {
-  const headings: Heading[] = [];
-  const lines = content.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const match = lines[i].match(/^(#{1,6})\s+(.+)/);
-    if (match) {
-      headings.push({ text: match[2].trim(), level: match[1].length, line: i });
-    }
-  }
-  return headings;
+  return invoke<string>("export_document", {
+    content,
+    inputPath,
+    format,
+    outputPath,
+    options: options ?? null,
+  });
 }
 
 export async function pasteImage(imageData: number[], mdPath: string): Promise<string> {

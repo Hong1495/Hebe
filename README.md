@@ -14,8 +14,9 @@ Hebe is a lightweight, open-source desktop Markdown editor inspired by Typora. R
 - **Technical writing** — editable tables, fenced code, Mermaid diagrams and KaTeX math.
 - **Local files first** — open files from Finder or drag them in, paste images into an adjacent `assets/` folder, and work across multiple tabs.
 - **A focused workspace** — native menus, optional outline, light/dark/system themes, focus mode and typewriter mode.
-- **Safer editing** — saved files auto-save after three seconds; closing or quitting checks unsaved changes. Tabs retain undo history, selection and scroll position during the session.
-- **Share your work** — export PDF, DOCX, HTML and EPUB with Pandoc, including rendered Mermaid diagrams.
+- **Safer editing** — independent autosave for every tab, atomic writes, external-change protection, visible save failures and recovery of untitled drafts. Tabs retain undo history, selection and scroll position during the session.
+- **Long documents** — navigable footnotes, `[toc]`, YAML Front Matter, image insertion and replacement.
+- **Share your work** — choose a destination for PDF, DOCX, HTML or EPUB. PDF options include paper size, font size, margins, contents and section numbering.
 - **In-app updates** — an orange indicator beside the macOS window controls, release-note popover, automatic checks, signed downloads and explicit restart, inspired by [Bee](https://github.com/Hong1495/Bee).
 
 ## Install
@@ -37,7 +38,15 @@ brew install pandoc
 brew install --cask basictex
 ```
 
-Exports are written beside the source document using the selected extension; an existing same-name export is replaced. Relative image paths resolve from the document folder. Documents must be saved before export or image paste.
+Choose a destination in the native save dialog, which confirms replacement of existing files. PDF supports A4/Letter paper, 10–12 pt type, 10–40 mm margins, contents and numbered headings. Failed exports preserve the previous destination file. Relative image paths resolve from the document folder. Documents must be saved before export or image paste.
+
+## Long documents and saving
+
+Put `[toc]` on its own line for a clickable contents block. Use `[^note]` and `[^note]: Text` for footnotes, with four-space-indented continuation lines. Opening YAML Front Matter delimited by `---` stays intact and renders as an editable metadata block. The **Format** menu inserts contents, footnotes and images; hover over an image to replace it or edit its description/path.
+
+Each saved tab autosaves after three seconds of inactivity. Clean tabs reload external edits; dirty tabs pause autosave and offer a disk copy, Save a copy, or explicit replacement. Closing and quitting still check unsaved changes. Atomic replacement preserves permissions and symlink targets. Other applications do not share Hebe's write lock, so avoid simultaneously saving the same file in two editors.
+
+These feature descriptions cover current source; the download above remains the latest published release, v1.1.1.
 
 ## Keyboard shortcuts
 
@@ -71,7 +80,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 Hebe edits local files without an account or cloud sync. Automatic update checks contact GitHub and can be turned off. Remote image URLs in a document may contact their hosts. Recent file paths and preferences stay on the device.
 
-The current release restores the most recent file at launch; it does not persist unsaved drafts or undo history across app restarts. MDX files can be opened as text, but JSX components are not executed. Export appearance follows Pandoc templates rather than exactly matching the editor.
+Current source restores open tabs and untitled drafts from local WebView storage; without a recovery session it opens the most recent file. Storage failures are shown in the editor. Clearing application data removes drafts. Undo history remains session-only. MDX files can be opened as text, but JSX components are not executed. Export appearance follows Pandoc templates rather than exactly matching the editor.
 
 ## Contributing
 

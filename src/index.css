@@ -1116,3 +1116,49 @@ input:focus-visible {
 
 .update-popover .update-action { padding: 9px 12px; border-radius: 6px; background: var(--text); color: var(--bg); }
 .update-popover header button { border: 0; background: transparent; }
+
+.document-notice {
+  padding: 8px 18px;
+  font-size: 12px;
+  background: color-mix(in srgb, #e59528 14%, var(--bg));
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.document-notice span { flex: 1; min-width: 200px; }
+.document-notice button { text-decoration: underline; cursor: pointer; }
+
+.cm-activeLine { background-color: transparent; }
+.cm-typewriter-mode .cm-content { padding-top: 45vh !important; padding-bottom: 45vh !important; }
+.cm-focus-mode .cm-code-block-widget,
+.cm-focus-mode .cm-math-block,
+.cm-focus-mode .cm-image-container,
+.cm-focus-mode .cm-mermaid-container { opacity: .35; }
+.cm-focus-mode .cm-editable-widget:focus-within { opacity: 1; }
+
+.export-dialog {
+  margin: auto; width: 390px; border: 1px solid var(--border); border-radius: 12px;
+  padding: 24px; background: var(--bg); color: var(--text); box-shadow: 0 16px 60px #0003;
+}
+.export-dialog::backdrop { background: #0004; }
+.export-dialog h2 { font-size: 18px; font-weight: 600; }
+.export-dialog p { font-size: 12px; opacity: .65; margin: 10px 0 20px; }
+.export-dialog label { display: flex; align-items: center; gap: 12px; margin: 14px 0; font-size: 13px; }
+.export-dialog select, .export-dialog input[type=number] { margin-left: auto; width: 95px; background: var(--bg); border: 1px solid var(--border); padding: 4px; border-radius: 4px; }
+.export-actions { display: flex; justify-content: flex-end; gap: 20px; margin-top: 24px; font-size: 13px; }
+.export-actions button { cursor: pointer; }
+
+.cm-long-document { padding: 16px 20px; margin: 12px 0; border: 1px solid var(--border); border-radius: 6px; font-size: .88em; }
+.cm-long-document strong { font-size: 12px; opacity: .6; }
+.cm-long-document-edit { float: right; font-size: 11px; opacity: .6; cursor: pointer; }
+.cm-long-document pre { white-space: pre-wrap; margin: 10px 0 0; font: inherit; }
+.cm-long-document nav { margin-top: 10px; }
+.cm-long-document nav button { display: block; cursor: pointer; color: var(--text); text-align: left; margin: 4px 0; }
+.cm-long-document button:hover { text-decoration: underline; }
+.cm-footnote-reference { vertical-align: super; font-size: .75em; color: #487eaf; cursor: pointer; }
+
+.cm-image-actions { display: flex; justify-content: center; gap: 16px; opacity: 0; font: 11px system-ui; padding: 6px; }
+.cm-image-container:hover .cm-image-actions, .cm-image-container:focus-within .cm-image-actions { opacity: .7; }
+.cm-image-actions button { cursor: pointer; }
+.cm-image-actions button:hover { text-decoration: underline; }

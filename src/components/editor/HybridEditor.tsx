@@ -7,12 +7,14 @@ import {
   Annotation,
   Compartment,
   EditorState,
-  StateEffect,
   type Extension,
+  StateEffect,
 } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView, highlightActiveLine, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { useEffect, useRef, useState } from "react";
+import { useAppStore } from "../../stores/app-store";
+import { editorSessions } from "./editor-sessions";
 import { blockWidgetPlugin } from "./extensions/block-widgets";
 import {
   clickRevealPlugin,
@@ -23,9 +25,9 @@ import {
   pasteImagePlugin,
   previewRevealRangeField,
 } from "./extensions/hybrid-preview";
-import { useAppStore } from "../../stores/app-store";
-import { editorSessions } from "./editor-sessions";
+import { typewriterExtension } from "./extensions/writing-modes";
 import { runMarkdownFormatCommand } from "./format-commands";
+import { pendingImages } from "./image-actions";
 
 const markdownHighlightStyle = HighlightStyle.define([
   { tag: tags.heading1, class: "md-heading-1" },
@@ -94,6 +96,7 @@ export function HybridEditor({
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const previewCompartmentRef = useRef<Compartment | null>(null);
+  const writingCompartmentRef = useRef(new Compartment());
   const pasteCompartmentRef = useRef(new Compartment());
   const [isReady, setIsReady] = useState(false);
 
@@ -176,6 +179,32 @@ export function HybridEditor({
     const extensions: Extension[] = [
       markdown({ base: markdownLanguage }),
       history(),
+      pendingImages,
+      EditorView.domEventHandlers({
+        compositionstart() {
+          useAppStore.setState((state) => ({
+            tabs: state.tabs.map((tab) =>
+              tab.id === documentId ? { ...tab, composing: true } : tab,
+            ),
+          }));
+          return false;
+        },
+        compositionend() {
+          // Let CodeMirror finish its final composition transaction before syncing disk changes.
+          setTimeout(
+            () =>
+              useAppStore.setState((state) => ({
+                tabs: state.tabs.map((tab) =>
+                  tab.id === documentId ? { ...tab, composing: false } : tab,
+                ),
+              })),
+            0,
+          );
+          return false;
+        },
+      }),
+      highlightActiveLine(),
+      writingCompartmentRef.current.of(typewriterMode ? typewriterExtension : []),
       closeBrackets(),
       highlightSelectionMatches(),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, ...closeBracketsKeymap]),
@@ -292,6 +321,9 @@ export function HybridEditor({
     const dom = viewRef.current?.dom;
     if (!dom) return;
     dom.classList.toggle("cm-typewriter-mode", typewriterMode);
+    viewRef.current?.dispatch({
+      effects: writingCompartmentRef.current.reconfigure(typewriterMode ? typewriterExtension : []),
+    });
   }, [typewriterMode]);
 
   useEffect(() => {

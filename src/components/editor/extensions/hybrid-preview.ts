@@ -1,11 +1,11 @@
 import { type EditorState, StateEffect, StateField, type Transaction } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, WidgetType } from "@codemirror/view";
+import { insertImage } from "../image-actions";
 import {
   type InlineSpanKind,
   type MarkdownLineReplacement,
   markdownVisibleLineLength,
   markdownVisibleLineOffsetToSourceOffset,
-  pasteMarkdownImage,
   scanMarkdownLineDecorations,
 } from "../markdown-kernel";
 
@@ -259,41 +259,15 @@ function rangeIsExplicitlyRevealed(state: EditorState, from: number, to: number)
 export const pasteImagePlugin = (mdPath: string | null) =>
   EditorView.domEventHandlers({
     paste(event: ClipboardEvent, view: EditorView) {
-      if (!mdPath) return false;
       const items = event.clipboardData?.items;
       if (!items) return false;
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (item.type.startsWith("image/")) {
-          event.preventDefault();
-          const blob = item.getAsFile();
-          if (!blob) continue;
-          const reader = new FileReader();
-          reader.onload = async () => {
-            const data = Array.from(new Uint8Array(reader.result as ArrayBuffer));
-            try {
-              const { pasteImage } = await import("../../../lib/ipc");
-              const relPath = await pasteImage(data, mdPath);
-              const imageMarkdown = `![](${relPath})`;
-              const selection = view.state.selection.main;
-              const paste = pasteMarkdownImage(
-                view.state.doc.toString(),
-                { from: selection.from, to: selection.to },
-                imageMarkdown,
-              );
-              view.dispatch({
-                changes: paste.changes[0],
-                selection: { anchor: paste.selection.from },
-                effects: setPreviewRevealRange.of(null),
-                scrollIntoView: true,
-              });
-            } catch {
-              // clipboard paste not available
-            }
-          };
-          reader.readAsArrayBuffer(blob);
-          return true;
-        }
+      for (const item of items) {
+        if (!item.type.startsWith("image/")) continue;
+        const blob = item.getAsFile();
+        if (!blob) continue;
+        event.preventDefault();
+        void insertImage(view, mdPath, blob);
+        return true;
       }
       return false;
     },

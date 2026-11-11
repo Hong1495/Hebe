@@ -120,6 +120,9 @@ pub fn run() {
                 MenuItemBuilder::with_id("format-ordered-list", "Ordered List")
                     .accelerator("CmdOrCtrl+Shift+7")
                     .build(handle)?;
+            let insert_image = MenuItemBuilder::with_id("insert-image", "Image from File…").build(handle)?;
+            let insert_toc = MenuItemBuilder::with_id("insert-toc", "Table of Contents").build(handle)?;
+            let insert_footnote = MenuItemBuilder::with_id("insert-footnote", "Footnote").build(handle)?;
             let format_task_list =
                 MenuItemBuilder::with_id("format-task-list", "Task List").build(handle)?;
             let format_quote = MenuItemBuilder::with_id("format-quote", "Block Quote")
@@ -181,6 +184,10 @@ pub fn run() {
                 .item(&format_task_list)
                 .item(&format_quote)
                 .item(&format_code_fence)
+                .separator()
+                .item(&insert_image)
+                .item(&insert_toc)
+                .item(&insert_footnote)
                 .build()?;
             let view_menu = SubmenuBuilder::new(handle, "View")
                 .item(&toggle_outline)
@@ -256,6 +263,7 @@ pub fn run() {
             commands::get_heading_outline,
             commands::export_document,
             commands::paste_image,
+            commands::import_image,
             commands::render_svg_to_png_data_uri,
             hide_main_window,
         ])

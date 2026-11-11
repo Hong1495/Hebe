@@ -6,20 +6,33 @@ const EXPORT_IMAGE_SCALE: f32 = 2.0;
 
 #[tauri::command]
 pub async fn paste_image(image_data: Vec<u8>, md_path: String) -> Result<String, String> {
-    let md_dir = Path::new(&md_path).parent().unwrap_or(Path::new("."));
+    let ext = if image_data.starts_with(b"\x89PNG\r\n\x1a\n") { "png" }
+        else if image_data.starts_with(&[0xff, 0xd8, 0xff]) { "jpg" }
+        else if image_data.starts_with(b"GIF8") { "gif" }
+        else if image_data.starts_with(b"RIFF") && image_data.get(8..12) == Some(b"WEBP") { "webp" }
+        else { return Err("Unsupported clipboard image format".into()); };
+    store_image(&image_data, &md_path, ext)
+}
+
+fn store_image(data: &[u8], md_path: &str, ext: &str) -> Result<String, String> {
+    use std::io::Write;
+    let md_dir = Path::new(md_path).parent().unwrap_or(Path::new("."));
     let assets_dir = md_dir.join("assets");
-    std::fs::create_dir_all(&assets_dir)
-        .map_err(|e| format!("Failed to create assets dir: {e}"))?;
+    std::fs::create_dir_all(&assets_dir).map_err(|e| e.to_string())?;
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let filename = format!("image-{ts}.{ext}");
+    let mut file = std::fs::OpenOptions::new().create_new(true).write(true).open(assets_dir.join(&filename)).map_err(|e| e.to_string())?;
+    file.write_all(data).map_err(|e| e.to_string())?;
+    file.sync_all().map_err(|e| e.to_string())?;
+    Ok(format!("assets/{filename}"))
+}
 
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    let filename = format!("image-{}.png", ts.as_millis());
-    let filepath = assets_dir.join(&filename);
-
-    std::fs::write(&filepath, &image_data).map_err(|e| format!("Failed to write image: {e}"))?;
-
-    Ok(format!("assets/{}", filename))
+#[tauri::command]
+pub fn import_image(source: String, md_path: String) -> Result<String, String> {
+    let ext = Path::new(&source).extension().and_then(|value| value.to_str()).unwrap_or("").to_lowercase();
+    if !["png", "jpg", "jpeg", "gif", "webp", "svg"].contains(&ext.as_str()) { return Err("Unsupported image format".into()); }
+    let data = std::fs::read(&source).map_err(|e| e.to_string())?;
+    store_image(&data, &md_path, &ext)
 }
 
 #[tauri::command]

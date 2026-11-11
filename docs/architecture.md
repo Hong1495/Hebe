@@ -141,8 +141,10 @@ Important engine constraints:
 - System menus emit `menu-action` events consumed by the editor area.
 - Close hides the main window instead of quitting; reopen restores/focuses it.
 - Startup and macOS file-open events are queued through `take_pending_open_files`.
-- Recent files are restored on launch; missing recent paths are pruned.
-- Auto-save runs after a short debounce for saved files.
-- External file changes are detected by mtime polling when the current tab is
-  clean.
+- Validated local session snapshots restore tabs and untitled drafts before the recent-file fallback. Storage failures are surfaced in the editor.
+- `document-sync.ts` maintains independent debounce timers and polls all open paths. Dirty conflicts stop autosave; clean external changes reload by stable tab identity. IME composition defers autosave and external reload.
+- `document-lifecycle.ts` serializes saves per tab and acknowledges the exact saved snapshot even if typing continues. Close/quit waits for pending writes and prevents background saves during prompts.
+- Rust file writes compare the expected saved text immediately before same-directory atomic replacement, preserving permissions and symlink targets. This protects against observed changes, not arbitrary simultaneous writes by applications outside Hebe.
+- Export runs on a blocking worker, writes a temporary output, then replaces the selected destination only on success. PDF targets LaTeX through XeLaTeX; native save dialogs confirm overwrites.
+- `long-document.ts` shares cached heading/metadata/footnote parsing between outline, preview and export. Code and metadata regions stay isolated. Image insertion tracks a mapped source range during asynchronous file operations.
 

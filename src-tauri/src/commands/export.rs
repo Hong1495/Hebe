@@ -43,11 +43,34 @@ fn configure_tool_path(command: &mut std::process::Command) {
     }
 }
 
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportOptions {
+    paper_size: String,
+    font_size: u8,
+    margin_mm: u8,
+    table_of_contents: bool,
+    number_sections: bool,
+}
+
 #[tauri::command]
 pub async fn export_document(
     content: String,
     input_path: String,
     format: String,
+    output_path: String,
+    options: Option<ExportOptions>,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || export_sync(content, input_path, format, output_path, options))
+        .await.map_err(|e| e.to_string())?
+}
+
+fn export_sync(
+    content: String,
+    input_path: String,
+    format: String,
+    output_path: String,
+    options: Option<ExportOptions>,
 ) -> Result<String, String> {
     let ext = match format.as_str() {
         "pdf" => "pdf",
@@ -58,9 +81,16 @@ pub async fn export_document(
     };
 
     let document_path = std::fs::canonicalize(&input_path).map_err(|e| e.to_string())?;
-    let mut output_path = document_path.clone();
-    output_path.set_extension(ext);
-    let output_path = output_path.to_string_lossy().to_string();
+    let destination = PathBuf::from(&output_path);
+    if destination.extension().and_then(|value| value.to_str()) != Some(ext) {
+        return Err(format!("Choose a .{ext} destination"));
+    }
+    if destination.exists() && std::fs::canonicalize(&destination).map_err(|e| e.to_string())? == document_path {
+        return Err("Export cannot replace the source document".into());
+    }
+    let parent = destination.parent().ok_or("Export has no parent directory")?;
+    let temp = tempfile::Builder::new().suffix(&format!(".{ext}")).tempfile_in(parent).map_err(|e| e.to_string())?;
+    let options = options.unwrap_or_default();
 
     let pandoc_path = resolve_tool("pandoc").ok_or_else(|| {
         "Pandoc is not installed. Install it from https://pandoc.org/installing.html".to_string()
@@ -77,9 +107,12 @@ pub async fn export_document(
         .arg(document_dir);
     command
         .arg("-o")
-        .arg(&output_path)
+        .arg(temp.path())
         .arg("--from=markdown")
-        .arg(format!("--to={format}"));
+        .arg(format!("--to={}", if format == "pdf" { "latex" } else { &format }))
+        .arg("--standalone");
+    if options.table_of_contents { command.arg("--toc"); }
+    if options.number_sections { command.arg("--number-sections"); }
 
     if format == "pdf" {
         let xelatex_path = resolve_tool("xelatex").ok_or_else(|| {
@@ -92,7 +125,11 @@ pub async fn export_document(
             .arg("-V")
             .arg("mainfont=PingFang SC")
             .arg("-V")
-            .arg("CJKmainfont=PingFang SC");
+            .arg("CJKmainfont=PingFang SC")
+            .arg("-V").arg(format!("papersize={}", if options.paper_size == "letter" { "letter" } else { "a4" }))
+            .arg("-V").arg(format!("fontsize={}pt", if [10,11,12].contains(&options.font_size) { options.font_size } else { 11 }))
+            .arg("-V").arg(format!("geometry:margin={}mm", if (10..=40).contains(&options.margin_mm) { options.margin_mm } else { 20 }))
+            .arg("-V").arg("colorlinks=true");
     }
 
     let mut child = command
@@ -120,6 +157,8 @@ pub async fn export_document(
         .map_err(|e| format!("Pandoc process error: {e}"))?;
 
     if output.status.success() {
+        temp.as_file().sync_all().map_err(|e| e.to_string())?;
+        temp.persist(&destination).map_err(|e| e.to_string())?;
         Ok(output_path)
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -134,6 +173,43 @@ pub async fn export_document(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pdf_export_handles_chinese_footnotes_and_pagination() {
+        if resolve_tool("pandoc").is_none() || resolve_tool("xelatex").is_none() { return; }
+        let root = tempfile::tempdir().unwrap();
+        let document = root.path().join("sample.md");
+        let output = root.path().join("chosen.pdf");
+        let content = format!("---\ntitle: 青春与写作\n---\n\n# 中文标题\n\n正文脚注[^1]。\n\n[^1]: 中文脚注。\n\n{}", "这是一段用于检验自动分页的中文正文。\n\n".repeat(80));
+        std::fs::write(&document, &content).unwrap();
+        export_sync(content, document.to_string_lossy().into_owned(), "pdf".into(), output.to_string_lossy().into_owned(), Some(ExportOptions { paper_size: "a4".into(), font_size: 11, margin_mm: 20, table_of_contents: true, number_sections: true })).unwrap();
+        let bytes = std::fs::read(&output).unwrap();
+        assert!(bytes.starts_with(b"%PDF-"));
+        if let Some(extractor) = resolve_tool("pdftotext") {
+            let text = std::process::Command::new(extractor).arg(&output).arg("-").output().unwrap();
+            let text = String::from_utf8_lossy(&text.stdout);
+            assert!(text.contains("中文标题"));
+            assert!(text.contains("中文脚注"));
+            assert!(text.matches('\u{000c}').count() >= 2, "long document should paginate");
+        }
+        // A caller may choose to retain this fixture for visual review outside the repository.
+        if let Ok(destination) = std::env::var("HEBE_PDF_REVIEW_PATH") {
+            std::fs::copy(&output, destination).unwrap();
+        }
+    }
+
+    #[test]
+    fn failed_export_preserves_existing_output() {
+        if resolve_tool("pandoc").is_none() { return; }
+        let root = tempfile::tempdir().unwrap();
+        let document = root.path().join("sample.md");
+        let output = root.path().join("existing.docx");
+        std::fs::write(&document, "source").unwrap();
+        std::fs::write(&output, "keep me").unwrap();
+        let result = export_sync("---\ninvalid: [\n---\n".into(), document.to_string_lossy().into_owned(), "docx".into(), output.to_string_lossy().into_owned(), None);
+        assert!(result.is_err());
+        assert_eq!(std::fs::read_to_string(&output).unwrap(), "keep me");
+    }
 
     #[test]
     fn exports_relative_image_from_document_directory() {
@@ -153,6 +229,8 @@ mod tests {
             "![image](assets/image.png)".to_string(),
             document.to_string_lossy().into_owned(),
             "docx".to_string(),
+            root.join("chosen.docx").to_string_lossy().into_owned(),
+            None,
         ))
         .expect("export should succeed");
         let archive = std::fs::read(output).unwrap();

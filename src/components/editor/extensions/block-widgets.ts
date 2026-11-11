@@ -7,6 +7,14 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import katex from "katex";
 import { isTauriRuntime } from "../../../lib/ipc";
 import { dirname } from "../../../lib/path";
+import { useAppStore } from "../../../stores/app-store";
+import { insertImage } from "../image-actions";
+import {
+  type DocumentHeading,
+  type FootnoteReference,
+  inspectLongDocument,
+  type LongDocumentBlock,
+} from "../long-document";
 import {
   appendMarkdownTableRow,
   deleteMarkdownTableColumn,
@@ -242,6 +250,113 @@ async function highlightCodeElement(
   }
 }
 
+class LongDocumentWidget extends WidgetType {
+  readonly data: LongDocumentBlock;
+  readonly headings: DocumentHeading[];
+  constructor(data: LongDocumentBlock, headings: DocumentHeading[]) {
+    super();
+    this.data = data;
+    this.headings = headings;
+  }
+  eq(other: LongDocumentWidget) {
+    return (
+      JSON.stringify(this.data) === JSON.stringify(other.data) &&
+      JSON.stringify(this.headings) === JSON.stringify(other.headings)
+    );
+  }
+  toDOM(view: EditorView) {
+    const container = document.createElement("div");
+    container.className = "cm-long-document cm-editable-widget";
+    const edit = document.createElement("button");
+    edit.textContent = "Edit source";
+    edit.className = "cm-long-document-edit";
+    edit.onclick = () => {
+      view.dispatch({
+        selection: { anchor: this.data.from },
+        effects: setPreviewRevealRange.of({ from: this.data.from, to: this.data.to }),
+        scrollIntoView: true,
+      });
+      view.focus();
+    };
+    const title = document.createElement("strong");
+    title.textContent =
+      this.data.kind === "toc"
+        ? "Contents"
+        : this.data.kind === "frontMatter"
+          ? "Document metadata"
+          : `Footnote · ${this.data.label}`;
+    container.append(title, edit);
+    if (this.data.kind === "toc") {
+      const nav = document.createElement("nav");
+      nav.setAttribute("aria-label", "Document contents");
+      for (const heading of this.headings) {
+        const link = document.createElement("button");
+        link.textContent = heading.text;
+        link.style.paddingLeft = `${(heading.level - 1) * 16}px`;
+        link.onclick = () => {
+          view.dispatch({ selection: { anchor: heading.from }, scrollIntoView: true });
+          view.focus();
+        };
+        nav.append(link);
+      }
+      if (!this.headings.length) nav.textContent = "Add headings to build a table of contents.";
+      container.append(nav);
+    } else {
+      const content = document.createElement("pre");
+      content.textContent = this.data.content;
+      container.append(content);
+      if (this.data.kind === "footnoteDefinition") {
+        const back = document.createElement("button");
+        back.textContent = "Back to reference ↑";
+        back.onclick = () => {
+          const reference = inspectLongDocument(view.state.doc.toString()).references.find(
+            (item) => item.label === this.data.label,
+          );
+          if (reference) {
+            view.dispatch({ selection: { anchor: reference.from }, scrollIntoView: true });
+            view.focus();
+          }
+        };
+        container.append(back);
+      }
+    }
+    return container;
+  }
+  ignoreEvent() {
+    return false;
+  }
+}
+
+class FootnoteWidget extends WidgetType {
+  readonly reference: FootnoteReference;
+  constructor(reference: FootnoteReference) {
+    super();
+    this.reference = reference;
+  }
+  eq(other: FootnoteWidget) {
+    return JSON.stringify(other.reference) === JSON.stringify(this.reference);
+  }
+  toDOM(view: EditorView) {
+    const button = document.createElement("button");
+    button.className = "cm-footnote-reference cm-editable-widget";
+    button.textContent = String(this.reference.number);
+    button.title =
+      this.reference.definition === undefined
+        ? `Missing footnote: ${this.reference.label}`
+        : `Go to footnote: ${this.reference.label}`;
+    button.setAttribute("aria-label", button.title);
+    button.onclick = () => {
+      const anchor = this.reference.definition ?? this.reference.from;
+      view.dispatch({ selection: { anchor }, scrollIntoView: true });
+      view.focus();
+    };
+    return button;
+  }
+  ignoreEvent() {
+    return false;
+  }
+}
+
 class ImageWidget extends WidgetType {
   readonly alt: string;
   readonly src: string;
@@ -257,6 +372,7 @@ class ImageWidget extends WidgetType {
   override eq(other: ImageWidget): boolean {
     return (
       other.src === this.src &&
+      other.alt === this.alt &&
       markdownBlockProjectionKey(other.projection) === markdownBlockProjectionKey(this.projection)
     );
   }
@@ -272,10 +388,37 @@ class ImageWidget extends WidgetType {
     img.loading = "lazy";
 
     img.onerror = () => {
-      container.replaceChildren(createFallbackText(this.alt || this.src));
+      img.replaceWith(createFallbackText(this.alt || this.src));
     };
 
-    container.appendChild(img);
+    const actions = document.createElement("div");
+    actions.className = "cm-image-actions";
+    const replace = document.createElement("button");
+    replace.textContent = "Replace image…";
+    replace.onmousedown = (event) => event.stopPropagation();
+    replace.onclick = (event) => {
+      event.stopPropagation();
+      void insertImage(view, useAppStore.getState().currentFilePath(), undefined, {
+        from: this.projection.revealFrom,
+        to: this.projection.revealTo,
+      });
+    };
+    const edit = document.createElement("button");
+    edit.textContent = "Edit description / path";
+    edit.onmousedown = (event) => event.stopPropagation();
+    edit.onclick = (event) => {
+      event.stopPropagation();
+      view.dispatch({
+        selection: { anchor: this.projection.cursorFrom },
+        effects: setPreviewRevealRange.of({
+          from: this.projection.revealFrom,
+          to: this.projection.revealTo,
+        }),
+      });
+      view.focus();
+    };
+    actions.append(replace, edit);
+    container.append(img, actions);
     return container;
   }
 
@@ -883,6 +1026,7 @@ function blockDecorations(state: EditorState, mdPath: string | null): Decoration
   const widgets: { from: number; to: number; widget: Decoration }[] = [];
   const revealRange = state.field(previewRevealRangeField, false) ?? null;
 
+  const longDocument = inspectLongDocument(state.doc.toString());
   for (const block of parseMarkdownBlocks(state.doc.toString())) {
     const revealFrom = block.kind === "inlineMath" ? block.lineFrom : block.from;
     const revealTo = block.kind === "inlineMath" ? block.lineTo : block.to;
@@ -892,6 +1036,18 @@ function blockDecorations(state: EditorState, mdPath: string | null): Decoration
     }
 
     switch (block.kind) {
+      case "frontMatter":
+      case "toc":
+      case "footnoteDefinition":
+        widgets.push({
+          from: block.from,
+          to: block.to,
+          widget: Decoration.replace({
+            widget: new LongDocumentWidget(block, longDocument.headings),
+            block: true,
+          }),
+        });
+        break;
       case "fencedCode":
         widgets.push({
           from: block.from,
@@ -948,6 +1104,18 @@ function blockDecorations(state: EditorState, mdPath: string | null): Decoration
         });
         break;
     }
+  }
+
+  for (const reference of longDocument.references) {
+    const line = state.doc.lineAt(reference.from);
+    if (rangeIsRevealed(state, revealRange, line.from, line.to)) continue;
+    if (widgets.some((widget) => reference.from < widget.to && reference.to > widget.from))
+      continue;
+    widgets.push({
+      from: reference.from,
+      to: reference.to,
+      widget: Decoration.replace({ widget: new FootnoteWidget(reference) }),
+    });
   }
 
   return Decoration.set(

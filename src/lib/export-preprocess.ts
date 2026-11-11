@@ -1,4 +1,5 @@
-import { parseMarkdownBlocks, type FencedCodeBlock } from "../components/editor/markdown-kernel";
+import { inspectLongDocument } from "../components/editor/long-document";
+import { type FencedCodeBlock, parseMarkdownBlocks } from "../components/editor/markdown-kernel";
 import { isTauriRuntime, renderSvgToPngDataUri } from "./ipc";
 
 export type MermaidExportRenderer = (code: string, index: number) => Promise<string>;
@@ -19,7 +20,19 @@ export async function prepareMarkdownForExport(
     (block): block is FencedCodeBlock => block.kind === "fencedCode" && block.isMermaid,
   );
 
-  if (mermaidBlocks.length === 0) return content;
+  const longDocument = inspectLongDocument(content);
+  const tocReplacements = longDocument.blocks
+    .filter((block) => block.kind === "toc")
+    .map((block) => ({
+      from: block.from,
+      to: block.to,
+      text: longDocument.headings
+        .map(
+          (heading) =>
+            `${"  ".repeat(heading.level - 1)}- [${heading.text.replace(/[\[\]]/g, "")}](#${heading.slug})`,
+        )
+        .join("\n"),
+    }));
 
   const replacements = await Promise.all(
     mermaidBlocks.map(async (block, index): Promise<MarkdownReplacement> => {
@@ -37,7 +50,7 @@ export async function prepareMarkdownForExport(
     }),
   );
 
-  return applyMarkdownReplacements(content, replacements);
+  return applyMarkdownReplacements(content, [...replacements, ...tocReplacements]);
 }
 
 function applyMarkdownReplacements(content: string, replacements: MarkdownReplacement[]): string {

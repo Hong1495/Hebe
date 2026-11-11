@@ -19,7 +19,7 @@ describe("document lifecycle", () => {
   it("saves dirty documents before approving quit", async () => {
     mocks.message.mockResolvedValue("Save");
     expect(await prepareWindowClose()).toBe(true);
-    expect(mocks.write).toHaveBeenCalledWith("/tmp/a.md", "edited");
+    expect(mocks.write).toHaveBeenCalledWith("/tmp/a.md", "edited", "original");
     expect(useAppStore.getState().tabs[0].dirty).toBe(false);
   });
   it("keeps a document open when saving fails", async () => {
@@ -45,4 +45,35 @@ describe("document lifecycle", () => {
     expect(await prepareWindowClose()).toBe(true);
     expect(useAppStore.getState().tabs[0].content).toBe("original");
   });
+});
+
+it("advances the saved baseline while preserving newer edits", async () => {
+  mocks.write.mockImplementationOnce(async () => useAppStore.getState().updateActiveContent("newer"));
+  expect(await saveTabAt(0)).toBe(true);
+  expect(useAppStore.getState().tabs[0]).toMatchObject({ content: "newer", savedContent: "edited", dirty: true });
+  await saveTabAt(0);
+  expect(mocks.write).toHaveBeenLastCalledWith("/tmp/a.md", "newer", "edited");
+});
+it("attaches a newly saved path even when typing continues during the dialog", async () => {
+  useAppStore.setState({ tabs: [{ id: "draft", path: null, content: "draft", savedContent: "", dirty: true }] });
+  mocks.save.mockImplementation(async () => { useAppStore.getState().updateActiveContent("continued"); return "/tmp/new.md"; });
+  await saveTabAt(0);
+  expect(useAppStore.getState().tabs[0]).toMatchObject({ path: "/tmp/new.md", content: "continued", savedContent: "draft", dirty: true });
+});
+it("exposes background failures without marking the document saved", async () => {
+  mocks.write.mockRejectedValue(new Error("CONFLICT: changed"));
+  expect(await saveTabAt(0, { background: true })).toBe(false);
+  expect(useAppStore.getState().tabs[0]).toMatchObject({ dirty: true, savedContent: "original", saveError: "CONFLICT: changed" });
+  expect(mocks.message).not.toHaveBeenCalled();
+});
+it("serializes concurrent saves of the same document", async () => {
+  let release!: () => void;
+  mocks.write.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+  const first = saveTabAt(0);
+  useAppStore.getState().updateActiveContent("newer");
+  const second = saveTabAt(0);
+  expect(mocks.write).toHaveBeenCalledTimes(1);
+  release();
+  await Promise.all([first, second]);
+  expect(mocks.write).toHaveBeenLastCalledWith("/tmp/a.md", "newer", "edited");
 });

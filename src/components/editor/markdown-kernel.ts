@@ -1,3 +1,4 @@
+import { frontMatterRange, inspectLongDocument, type LongDocumentBlock } from "./long-document";
 export interface FenceMarker {
   marker: "`" | "~";
   length: number;
@@ -98,7 +99,13 @@ export interface InlineMathSpan {
   lineTo: number;
 }
 
-export type MarkdownBlock = FencedCodeBlock | MathBlock | TableBlock | ImageBlock | InlineMathSpan;
+export type MarkdownBlock =
+  | LongDocumentBlock
+  | FencedCodeBlock
+  | MathBlock
+  | TableBlock
+  | ImageBlock
+  | InlineMathSpan;
 
 export type MarkdownBlockProjectionClickMode = "range" | "content" | "contentStart";
 
@@ -377,9 +384,17 @@ export function scanInlineMarkdownSpans(text: string): InlineSpan[] {
 
 export function parseMarkdownBlocks(source: string): MarkdownBlock[] {
   const lines = splitSourceLines(source);
-  const blocks: MarkdownBlock[] = [];
+  const longBlocks = inspectLongDocument(source).blocks;
+  const blocks: MarkdownBlock[] = [...longBlocks];
 
   for (let index = 0; index < lines.length; index++) {
+    const longBlock = longBlocks.find(
+      (block) => lines[index].from >= block.from && lines[index].from < block.to,
+    );
+    if (longBlock) {
+      index = longBlock.endLine - 1;
+      continue;
+    }
     const fencedBlock = readFencedCodeBlock(source, lines, index);
     if (fencedBlock) {
       blocks.push(fencedBlock);
@@ -450,6 +465,9 @@ export function markdownBlockProjection(block: MarkdownBlock): MarkdownBlockProj
         clickMode: "range",
       };
 
+    case "frontMatter":
+    case "toc":
+    case "footnoteDefinition":
     case "image":
     case "table":
       return {
@@ -807,8 +825,13 @@ export function scanMarkdownLineDecorations(
   const lines = splitSourceLines(source);
   const decorations: MarkdownLineDecoration[] = [];
   let activeFence: FenceMarker | null = null;
+  const front = frontMatterRange(source);
 
   for (const line of lines) {
+    if (front && line.from < front.to) {
+      decorations.push(scanFencedSourceLine(line));
+      continue;
+    }
     if (activeFence) {
       decorations.push(scanFencedSourceLine(line));
       if (isFenceCloser(line.text, activeFence)) activeFence = null;

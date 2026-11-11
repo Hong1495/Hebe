@@ -30,6 +30,7 @@ log = "0.4"
 pulldown-cmark = "0.12"
 resvg = "0.45.1"
 base64 = "0.22"
+tempfile = "3"
 
 [profile.release]
 strip = true

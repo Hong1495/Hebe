@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { parseSession, SESSION_KEY } from "../lib/session-recovery";
 import { isThemePreference, THEME_STORAGE_KEY, type ThemePreference } from "../lib/theme";
 
 export interface TabState {
@@ -7,9 +8,12 @@ export interface TabState {
   content: string;
   savedContent: string;
   dirty: boolean;
+  saveError?: string;
+  composing?: boolean;
 }
 
 interface AppState {
+  recoveryError: string | null;
   settingsVisible: boolean;
   outlineVisible: boolean;
   outlineWidth: number;
@@ -49,7 +53,7 @@ interface AppState {
   updateActiveContent: (content: string) => void;
   setTabContent: (index: number, content: string) => void; // set content without marking dirty
   setTabDirty: (index: number, dirty: boolean) => void;
-  markTabSaved: (index: number, path?: string) => void;
+  markTabSaved: (index: number, path?: string, savedContent?: string) => void;
   discardTabChanges: (index: number) => void;
   setActiveTabPath: (path: string) => void;
   setTabPath: (index: number, path: string) => void;
@@ -88,7 +92,17 @@ const readStoredZoom = (): number => {
   return 100;
 };
 
+let recoveryError: string | null = null;
+let recovered: ReturnType<typeof parseSession> = null;
+try {
+  if (typeof localStorage !== "undefined")
+    recovered = parseSession(localStorage.getItem(SESSION_KEY));
+} catch (error) {
+  recoveryError = `Draft recovery failed: ${String(error)}. Save important documents to disk.`;
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
+  recoveryError,
   settingsVisible: false,
   outlineVisible: false,
   outlineWidth: 232,
@@ -97,8 +111,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   sourceMode: false,
   theme: readStoredTheme(),
   zoom: readStoredZoom(),
-  tabs: [{ id: crypto.randomUUID(), path: null, content: "", savedContent: "", dirty: false }],
-  activeTabIndex: 0,
+  tabs: recovered?.tabs ?? [
+    { id: crypto.randomUUID(), path: null, content: "", savedContent: "", dirty: false },
+  ],
+  activeTabIndex: recovered?.activeTabIndex ?? 0,
   recentFiles: readStoredRecentFiles(),
 
   currentFilePath: () => {
@@ -166,7 +182,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((s) => ({
       tabs: [
         ...s.tabs,
-        { id: crypto.randomUUID(), path: null, content, savedContent: content, dirty: false },
+        { id: crypto.randomUUID(), path: null, content, savedContent: "", dirty: content !== "" },
       ],
       activeTabIndex: s.tabs.length,
     })),
@@ -206,7 +222,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   setTabContent: (index, content) =>
     set((s) => ({
       tabs: s.tabs.map((t, i) =>
-        i === index ? { ...t, content, savedContent: content, dirty: false } : t,
+        i === index
+          ? { ...t, content, savedContent: content, dirty: false, saveError: undefined }
+          : t,
       ),
     })),
   setTabDirty: (index, dirty) =>
@@ -215,10 +233,18 @@ export const useAppStore = create<AppState>((set, get) => ({
         i === index ? { ...t, dirty, savedContent: dirty ? t.savedContent : t.content } : t,
       ),
     })),
-  markTabSaved: (index, path) =>
+  markTabSaved: (index, path, savedContent) =>
     set((s) => ({
       tabs: s.tabs.map((t, i) =>
-        i === index ? { ...t, path: path ?? t.path, savedContent: t.content, dirty: false } : t,
+        i === index
+          ? {
+              ...t,
+              path: path ?? t.path,
+              savedContent: savedContent ?? t.content,
+              dirty: t.content !== (savedContent ?? t.content),
+              saveError: undefined,
+            }
+          : t,
       ),
     })),
   discardTabChanges: (index) =>
@@ -272,3 +298,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ recentFiles });
   },
 }));
+
+// Persist immediately, including untitled drafts. Errors stay visible rather than silently
+// pretending the browser storage quota is unlimited.
+useAppStore.subscribe((state, previous) => {
+  if (state.tabs === previous.tabs && state.activeTabIndex === previous.activeTabIndex) return;
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(
+      SESSION_KEY,
+      JSON.stringify({ version: 1, tabs: state.tabs, activeTabIndex: state.activeTabIndex }),
+    );
+    if (state.recoveryError) useAppStore.setState({ recoveryError: null });
+  } catch (error) {
+    useAppStore.setState({
+      recoveryError: `Draft backup failed: ${String(error)}. Save important documents to disk.`,
+    });
+  }
+});
