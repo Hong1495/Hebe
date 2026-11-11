@@ -1,6 +1,6 @@
 # Writing foundations verification
 
-Implemented after v1.1.1; this document describes current source, not a published installer.
+Verification record for the writing foundations included in v1.2.0.
 
 ## Automated checks
 

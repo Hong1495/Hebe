@@ -1,12 +1,29 @@
-# Hebe 1.1.1 — A fresh mark, quieter updates
+# Hebe 1.2.0 — Safer writing, longer documents
 
-- Replace the app icon with the new feather-and-leaf M: Markdown writing meets Hebe’s spirit of youth and renewal. Update the macOS icon and browser favicon together.
-- Keep **Hebe → Check for Updates…** in the background. It no longer opens Settings, switches settings sections, or automatically opens an update popover.
-- When a new version is found, the orange indicator remains beside the macOS window controls. Click it to view release notes and install.
-- Add regression coverage for available updates, no update, and network failures while preserving the current settings visibility.
+## 文档安全
 
-## 从 1.1.0 升级
+- 所有标签独立自动保存，切换标签不会取消其他文档的保存。
+- 使用原子写入，并在保存前核对磁盘版本；外部修改与保存失败会显示提示。
+- 恢复打开的标签和未命名草稿；提供查看磁盘副本、另存副本及确认覆盖入口。
+- 连续输入期间保留最新编辑，关闭与退出等待进行中的保存。
 
-在已安装的 Hebe 中检查更新，点击橙色圆点，选择下载安装，再重启。1.1.0 的检查入口仍可能弹出设置，这是旧版本行为；升级到 1.1.1 后菜单检查会保持后台运行。
+## 写作体验
 
-Requires Apple Silicon and macOS 13+. Signed updater archives use the same trusted key as 1.1.0. This release is ad-hoc signed and is not Apple-notarized.
+- 修复专注模式的当前行强调，实现打字机模式的光标居中。
+- 输入法组合期间暂停自动保存和外部重载。
+- 异步图片插入跟踪原始位置，避免光标移动后插错位置。
+
+## 导出与长文
+
+- 所有导出可选择目标位置，覆盖已有文件需确认，导出失败保留旧文件。
+- PDF 支持 A4 / Letter、字号、页边距、目录和章节编号，修复 XeLaTeX 导出路径。
+- 新增正文 `[toc]` 目录、脚注跳转及 YAML Front Matter 预览。
+- Format 菜单新增图片、目录与脚注插入；图片支持替换和编辑描述/路径。
+
+## Upgrade / 升级
+
+在已安装的 Hebe 中选择 **Hebe → Check for Updates…**，点击红黄绿窗口按钮旁的橙色圆点，下载安装后重启。菜单检查保持后台运行。也可下载 DMG 手动安装。
+
+This release adds independent per-tab autosave, atomic writes, draft recovery, external-change protection, working focus/typewriter modes, configurable PDF export, footnotes, contents, Front Matter and image actions. Verified with 73 frontend tests, 7 Rust tests and a real Chinese PDF export.
+
+Requires Apple Silicon and macOS 13+. PDF export requires Pandoc and XeLaTeX. Draft recovery uses local WebView storage; clearing app data removes drafts, and undo history remains session-only. Native Chinese IME candidate-window flows have not been fully exercised. Updater archives use the existing trusted signing key. The app is ad-hoc signed, without Apple Developer ID notarization.

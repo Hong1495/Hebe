@@ -21,7 +21,7 @@ Hebe 是一款受 Typora 启发的开源 Markdown 编辑器：平时阅读排版
 
 ## 安装
 
-当前版本 **v1.1.1** 支持 **Apple Silicon Mac，macOS 13 及以上**，暂不提供 Intel Mac、Windows 或 Linux 安装包。
+当前版本 **v1.2.0** 支持 **Apple Silicon Mac，macOS 13 及以上**，暂不提供 Intel Mac、Windows 或 Linux 安装包。
 
 1. 从 [Releases](https://github.com/Hong1495/Hebe/releases/latest) 下载 DMG。
 2. 将 Hebe.app 拖入 Applications，从安装位置启动；不要直接在只读 DMG 中使用升级功能。
@@ -45,8 +45,6 @@ brew install --cask basictex
 在独立一行输入 `[toc]` 生成可点击目录；使用 `[^note]` 与 `[^note]: 内容` 编写脚注，续行缩进四个空格。文档开头以 `---` 包围的 YAML 元数据保留原样并显示为可编辑块。菜单 **Format** 提供目录、脚注和图片插入；图片悬停后可替换或编辑描述与路径。
 
 已保存文件停止输入三秒后自动保存，切换标签不会取消其他标签的保存。检测到外部修改时，干净标签自动更新，存在本地编辑的标签暂停自动保存并提供查看磁盘副本、另存副本和确认覆盖入口。关闭或退出仍会询问未保存内容。写入使用临时文件替换，保留权限及符号链接；跨应用同时写入无法形成全局锁，仍建议避免两个编辑器同时保存同一文件。
-
-本文功能说明对应当前源码；上方下载链接仍指向最近发布的 v1.1.1。
 
 ## 开发
 

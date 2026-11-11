@@ -21,9 +21,9 @@ Hebe is a lightweight, open-source desktop Markdown editor inspired by Typora. R
 
 ## Install
 
-The current release, **v1.1.1**, supports **Apple Silicon Macs running macOS 13 or later**. Intel macOS, Windows and Linux binaries are not provided in this release.
+The current release, **v1.2.0**, supports **Apple Silicon Macs running macOS 13 or later**. Intel macOS, Windows and Linux binaries are not provided in this release.
 
-1. Download `Hebe_1.1.1_aarch64.dmg` from [Releases](https://github.com/Hong1495/Hebe/releases/latest).
+1. Download `Hebe_1.2.0_aarch64.dmg` from [Releases](https://github.com/Hong1495/Hebe/releases/latest).
 2. Open the DMG and drag **Hebe.app** into **Applications**. Launch the installed copy, not the read-only disk image.
 3. This release is ad-hoc signed, without Apple Developer ID signing or notarization. If macOS blocks it, use **System Settings → Privacy & Security → Open Anyway** after reviewing the source and release checksums.
 
@@ -45,8 +45,6 @@ Choose a destination in the native save dialog, which confirms replacement of ex
 Put `[toc]` on its own line for a clickable contents block. Use `[^note]` and `[^note]: Text` for footnotes, with four-space-indented continuation lines. Opening YAML Front Matter delimited by `---` stays intact and renders as an editable metadata block. The **Format** menu inserts contents, footnotes and images; hover over an image to replace it or edit its description/path.
 
 Each saved tab autosaves after three seconds of inactivity. Clean tabs reload external edits; dirty tabs pause autosave and offer a disk copy, Save a copy, or explicit replacement. Closing and quitting still check unsaved changes. Atomic replacement preserves permissions and symlink targets. Other applications do not share Hebe's write lock, so avoid simultaneously saving the same file in two editors.
-
-These feature descriptions cover current source; the download above remains the latest published release, v1.1.1.
 
 ## Keyboard shortcuts
 
