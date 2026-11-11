@@ -18,7 +18,7 @@ export type UpdatePhase =
 const preference = "hebe-auto-update";
 export function useAppUpdates() {
   const [automatic, setAutomatic] = useState(() => localStorage.getItem(preference) !== "false");
-  const [version, setVersion] = useState("1.1.0");
+  const [version, setVersion] = useState("1.1.1");
   const [update, setUpdate] = useState<Update | null>(null);
   const [phase, setPhase] = useState<UpdatePhase>("idle");
   const [error, setError] = useState("");

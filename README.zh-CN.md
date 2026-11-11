@@ -20,13 +20,13 @@ Hebe 是一款受 Typora 启发的开源 Markdown 编辑器：平时阅读排版
 
 ## 安装
 
-首个公开版本 **v1.1.0** 支持 **Apple Silicon Mac，macOS 13 及以上**，暂不提供 Intel Mac、Windows 或 Linux 安装包。
+当前版本 **v1.1.1** 支持 **Apple Silicon Mac，macOS 13 及以上**，暂不提供 Intel Mac、Windows 或 Linux 安装包。
 
 1. 从 [Releases](https://github.com/Hong1495/Hebe/releases/latest) 下载 DMG。
 2. 将 Hebe.app 拖入 Applications，从安装位置启动；不要直接在只读 DMG 中使用升级功能。
 3. 本版本为 ad-hoc 签名，未经过 Apple Developer ID 签名和公证。如被 macOS 阻止，在确认来源和校验文件后，通过「系统设置 → 隐私与安全性 → 仍要打开」启动。
 
-菜单「Hebe → Check for Updates…」和「Settings → Updates」可手动检查升级。自动检查可以关闭，发现新版本后不会自动安装。更新包签名与 Apple 公证是两回事。
+菜单「Hebe → Check for Updates…」和「Settings → Updates」可手动检查升级。菜单检查在后台进行，不会自动弹出设置或升级浮层；发现更新后可点击橙色圆点查看。自动检查可以关闭，发现新版本后不会自动安装。更新包签名与 Apple 公证是两回事。
 
 ## 导出
 

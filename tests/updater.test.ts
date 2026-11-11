@@ -5,7 +5,7 @@ import { useAppStore } from "../src/stores/app-store";
 import { useAppUpdates } from "../src/lib/use-app-updates";
 const mock = vi.hoisted(() => ({check:vi.fn(),prepare:vi.fn(),invoke:vi.fn(),listen:vi.fn()}));
 vi.mock("@tauri-apps/api/core",()=>({isTauri:()=>true,invoke:mock.invoke}));
-vi.mock("@tauri-apps/api/app",()=>({getVersion:async()=>"1.1.0"}));
+vi.mock("@tauri-apps/api/app",()=>({getVersion:async()=>"1.1.1"}));
 vi.mock("@tauri-apps/api/event",()=>({listen:mock.listen}));
 vi.mock("@tauri-apps/plugin-updater",()=>({check:mock.check}));
 vi.mock("../src/lib/document-lifecycle",()=>({prepareWindowClose:mock.prepare}));

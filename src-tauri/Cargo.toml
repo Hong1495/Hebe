@@ -1,6 +1,6 @@
 [package]
 name = "hebe"
-version = "1.1.0"
+version = "1.1.1"
 description = "Hebe - A next-generation WYSIWYG Markdown editor"
 authors = ["Hebe Contributors"]
 license = "MIT"
