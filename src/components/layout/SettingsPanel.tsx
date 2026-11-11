@@ -33,12 +33,6 @@ export function SettingsDialog({ open, updates }: SettingsDialogProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [open, toggleSettings]);
 
-  useEffect(() => {
-    const show = () => setSection("updates");
-    window.addEventListener("hebe-show-updates", show);
-    return () => window.removeEventListener("hebe-show-updates", show);
-  }, []);
-
   const themes: {
     id: ThemePreference;
     label: string;

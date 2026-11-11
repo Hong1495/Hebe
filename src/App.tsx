@@ -32,11 +32,6 @@ async function setCheckedMenuItem(item: unknown, checked: boolean): Promise<void
 function App() {
   const updates = useAppUpdates();
   const [updateOpen, setUpdateOpen] = useState(false);
-  useEffect(() => {
-    const open = () => setUpdateOpen(true);
-    window.addEventListener("hebe-show-update-popover", open);
-    return () => window.removeEventListener("hebe-show-update-popover", open);
-  }, []);
   const outlineVisible = useAppStore((s) => s.outlineVisible);
   const settingsVisible = useAppStore((s) => s.settingsVisible);
   const outlineWidth = useAppStore((s) => s.outlineWidth);

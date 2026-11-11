@@ -5,7 +5,6 @@ import { getVersion } from "@tauri-apps/api/app";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { prepareWindowClose } from "./document-lifecycle";
 import { listen } from "@tauri-apps/api/event";
-import { useAppStore } from "../stores/app-store";
 import { scheduleUpdateChecks } from "./update-schedule";
 
 export type UpdatePhase =
@@ -141,14 +140,7 @@ export function useAppUpdates() {
     let stop: (() => void) | undefined;
     void listen<string>("menu-action", (event) => {
       if (event.payload === "check-updates") {
-        useAppStore.setState({ settingsVisible: true });
-        window.dispatchEvent(new Event("hebe-show-updates"));
-        void checkNow().then(() => {
-          if (resource.current) {
-            useAppStore.setState({ settingsVisible: false });
-            window.dispatchEvent(new Event("hebe-show-update-popover"));
-          }
-        });
+        void checkNow();
       }
     }).then((fn) => {
       if (cancelled) fn();
