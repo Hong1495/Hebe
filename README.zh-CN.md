@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="src-tauri/icons/128x128@2x.png" alt="Hebe — feather and leaf M" width="128" height="128" />
+</p>
+
 # Hebe
 
 **安静、轻量的桌面 Markdown 写作工具。**
