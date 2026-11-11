@@ -1,3 +1,4 @@
+import type { useAppUpdates } from "../../lib/use-app-updates";
 import { Minus, Monitor, Plus, Type, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ThemePreference } from "../../lib/theme";
@@ -5,11 +6,12 @@ import { useAppStore } from "../../stores/app-store";
 
 interface SettingsDialogProps {
   open: boolean;
+  updates: ReturnType<typeof useAppUpdates>;
 }
 
-type SettingsSection = "appearance" | "editor";
+type SettingsSection = "appearance" | "editor" | "updates";
 
-export function SettingsDialog({ open }: SettingsDialogProps) {
+export function SettingsDialog({ open, updates }: SettingsDialogProps) {
   const [section, setSection] = useState<SettingsSection>("appearance");
   const theme = useAppStore((s) => s.theme);
   const setTheme = useAppStore((s) => s.setTheme);
@@ -30,6 +32,12 @@ export function SettingsDialog({ open }: SettingsDialogProps) {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [open, toggleSettings]);
+
+  useEffect(() => {
+    const show = () => setSection("updates");
+    window.addEventListener("hebe-show-updates", show);
+    return () => window.removeEventListener("hebe-show-updates", show);
+  }, []);
 
   const themes: {
     id: ThemePreference;
@@ -83,10 +91,86 @@ export function SettingsDialog({ open }: SettingsDialogProps) {
               <Type size={15} />
               <span>Editor</span>
             </button>
+            <button
+              type="button"
+              className={`settings-nav-item ${section === "updates" ? "is-active" : ""}`}
+              onClick={() => setSection("updates")}
+            >
+              Updates{updates.phase === "available" ? " •" : ""}
+            </button>
           </nav>
 
           <div className="settings-pane">
-            {section === "appearance" ? (
+            {section === "updates" ? (
+              <>
+                <header className="settings-pane-header">
+                  <h2>Updates</h2>
+                </header>
+                <section className="settings-group update-settings">
+                  <p>Hebe {updates.version}</p>
+                  <label className="settings-row">
+                    <span>Check for updates automatically</span>
+                    <input
+                      type="checkbox"
+                      checked={updates.automatic}
+                      onChange={(event) => updates.setAutomatic(event.target.checked)}
+                    />
+                  </label>
+                  <p className="update-hint">
+                    Updates are downloaded and installed only when you choose.
+                  </p>
+                  {updates.update && <p>Version {updates.update.version} is available.</p>}
+                  {updates.update?.body && (
+                    <pre className="update-notes">{updates.update.body}</pre>
+                  )}
+                  {updates.phase === "checking" && <p>Checking for updates…</p>}
+                  {updates.phase === "idle" && updates.checked && <p>You’re up to date.</p>}
+                  {updates.phase === "downloading" && (
+                    <p>
+                      Downloading…{" "}
+                      {updates.progress.total
+                        ? `${Math.round((updates.progress.received / updates.progress.total) * 100)}%`
+                        : `${Math.round(updates.progress.received / 1024)} KB`}
+                    </p>
+                  )}
+                  {updates.phase === "installing" && <p>Preparing update…</p>}
+                  {updates.error && <p role="alert">{updates.error}</p>}
+                  <div className="update-actions">
+                    {updates.phase === "ready" ? (
+                      <button type="button" onClick={() => void updates.restart()}>
+                        Restart Hebe
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          disabled={["checking", "downloading", "installing"].includes(
+                            updates.phase,
+                          )}
+                          onClick={() => void updates.checkNow()}
+                        >
+                          Check for Updates
+                        </button>
+                        {updates.update && (
+                          <button
+                            type="button"
+                            disabled={["checking", "downloading", "installing"].includes(
+                              updates.phase,
+                            )}
+                            onClick={() => void updates.install()}
+                          >
+                            Download and Install
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                  {updates.phase === "ready" && (
+                    <p>Update installed. Restart to use the new version.</p>
+                  )}
+                </section>
+              </>
+            ) : section === "appearance" ? (
               <>
                 <header className="settings-pane-header">
                   <h2>Appearance</h2>

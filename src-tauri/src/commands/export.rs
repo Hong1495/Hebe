@@ -57,7 +57,8 @@ pub async fn export_document(
         _ => return Err(format!("Unsupported export format: {format}")),
     };
 
-    let mut output_path = std::path::PathBuf::from(&input_path);
+    let document_path = std::fs::canonicalize(&input_path).map_err(|e| e.to_string())?;
+    let mut output_path = document_path.clone();
     output_path.set_extension(ext);
     let output_path = output_path.to_string_lossy().to_string();
 
@@ -67,6 +68,13 @@ pub async fn export_document(
 
     let mut command = std::process::Command::new(pandoc_path);
     configure_tool_path(&mut command);
+    let document_dir = document_path
+        .parent()
+        .ok_or("Document has no parent directory")?;
+    command
+        .current_dir(document_dir)
+        .arg("--resource-path")
+        .arg(document_dir);
     command
         .arg("-o")
         .arg(&output_path)
@@ -120,5 +128,40 @@ pub async fn export_document(
         } else {
             Err(stderr)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exports_relative_image_from_document_directory() {
+        let Some(_) = resolve_tool("pandoc") else {
+            return;
+        };
+        let root = std::env::temp_dir().join(format!("hebe-export-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("assets")).unwrap();
+        std::fs::write(
+            root.join("assets/image.png"),
+            include_bytes!("../../icons/32x32.png"),
+        )
+        .unwrap();
+        let document = root.join("sample.md");
+        std::fs::write(&document, "![image](assets/image.png)").unwrap();
+        let output = tauri::async_runtime::block_on(export_document(
+            "![image](assets/image.png)".to_string(),
+            document.to_string_lossy().into_owned(),
+            "docx".to_string(),
+        ))
+        .expect("export should succeed");
+        let archive = std::fs::read(output).unwrap();
+        assert!(
+            archive
+                .windows(b"word/media/".len())
+                .any(|bytes| bytes == b"word/media/"),
+            "DOCX must embed the relative image"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

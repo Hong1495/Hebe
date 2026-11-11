@@ -1,3 +1,14 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
+pub struct ExitApproved(AtomicBool);
+
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    use tauri::Manager;
+    app.state::<ExitApproved>().0.store(true, Ordering::SeqCst);
+    app.exit(0);
+}
+
 pub struct PendingOpenFiles(std::sync::Mutex<Vec<String>>);
 
 #[tauri::command]
@@ -21,13 +32,21 @@ pub fn run() {
     use tauri::{Emitter, Manager};
 
     tauri::Builder::default()
+        .manage(ExitApproved(AtomicBool::new(false)))
+        .manage(restart::RestartTarget::capture())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(PendingOpenFiles(
             std::sync::Mutex::new(startup_open_paths()),
         ))
         .menu(|handle| {
+            let quit = MenuItemBuilder::with_id("quit-request", "Quit Hebe")
+                .accelerator("CmdOrCtrl+Q")
+                .build(handle)?;
             let settings = MenuItemBuilder::with_id("toggle-settings", "Settings...")
                 .accelerator("CmdOrCtrl+,")
                 .build(handle)?;
+            let updates =
+                MenuItemBuilder::with_id("check-updates", "Check for Updates…").build(handle)?;
             let help = MenuItemBuilder::with_id("hebe-help", "Hebe Help")
                 .enabled(false)
                 .build(handle)?;
@@ -114,6 +133,7 @@ pub fn run() {
                 .item(&PredefinedMenuItem::about(handle, None, None)?)
                 .separator()
                 .item(&settings)
+                .item(&updates)
                 .separator()
                 .item(&PredefinedMenuItem::services(handle, None)?)
                 .separator()
@@ -121,7 +141,7 @@ pub fn run() {
                 .item(&PredefinedMenuItem::hide_others(handle, None)?)
                 .item(&PredefinedMenuItem::show_all(handle, None)?)
                 .separator()
-                .item(&PredefinedMenuItem::quit(handle, None)?)
+                .item(&quit)
                 .build()?;
 
             let export_menu = SubmenuBuilder::new(handle, "Export")
@@ -195,6 +215,14 @@ pub fn run() {
         })
         .on_menu_event(|app, event| {
             let action = event.id().as_ref().to_string();
+            if action == "quit-request" {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                    let _ = window.emit("request-quit", ());
+                }
+                return;
+            }
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.emit("menu-action", action);
             } else {
@@ -219,6 +247,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             take_pending_open_files,
+            quit_app,
+            update_indicator::update_indicator_position,
+            restart::restart_after_update,
             commands::read_markdown_file,
             commands::write_markdown_file,
             commands::get_file_mtime,
@@ -231,6 +262,16 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+                if !app.state::<ExitApproved>().0.load(Ordering::SeqCst) {
+                    api.prevent_exit();
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                        let _ = window.emit("request-quit", ());
+                    }
+                }
+            }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = &event {
                 let paths = file_urls_to_paths(urls);
@@ -290,3 +331,5 @@ fn is_markdown_path(path: &std::path::Path) -> bool {
 }
 
 mod commands;
+mod restart;
+mod update_indicator;

@@ -3,7 +3,13 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
-import { Annotation, Compartment, EditorState, type Extension } from "@codemirror/state";
+import {
+  Annotation,
+  Compartment,
+  EditorState,
+  StateEffect,
+  type Extension,
+} from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { useEffect, useRef, useState } from "react";
@@ -17,6 +23,8 @@ import {
   pasteImagePlugin,
   previewRevealRangeField,
 } from "./extensions/hybrid-preview";
+import { useAppStore } from "../../stores/app-store";
+import { editorSessions } from "./editor-sessions";
 import { runMarkdownFormatCommand } from "./format-commands";
 
 const markdownHighlightStyle = HighlightStyle.define([
@@ -57,6 +65,7 @@ function hybridPreviewExtensions(sourceMode: boolean, mdPath: string | null): Ex
 }
 
 interface HybridEditorProps {
+  documentId: string;
   initialContent?: string;
   onContentChange?: (content: string) => void;
   onOpenFile?: () => void;
@@ -70,6 +79,7 @@ interface HybridEditorProps {
 }
 
 export function HybridEditor({
+  documentId,
   initialContent = "",
   onContentChange,
   onOpenFile,
@@ -84,6 +94,7 @@ export function HybridEditor({
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const previewCompartmentRef = useRef<Compartment | null>(null);
+  const pasteCompartmentRef = useRef(new Compartment());
   const [isReady, setIsReady] = useState(false);
 
   if (!previewCompartmentRef.current) {
@@ -176,7 +187,7 @@ export function HybridEditor({
       previewRevealRangeField,
       previewCompartment.of(hybridPreviewExtensions(sourceMode, mdPath ?? null)),
 
-      pasteImagePlugin(mdPath ?? null),
+      pasteCompartmentRef.current.of(pasteImagePlugin(mdPath ?? null)),
 
       syntaxHighlighting(markdownHighlightStyle),
 
@@ -184,10 +195,19 @@ export function HybridEditor({
       updateTestBridge,
     ];
 
-    const state = EditorState.create({ doc: initialContent, extensions });
+    const session = editorSessions.get(documentId);
+    let state = session?.state ?? EditorState.create({ doc: initialContent, extensions });
+    if (session) state = state.update({ effects: StateEffect.reconfigure.of(extensions) }).state;
     const view = new EditorView({ state, parent: containerRef.current });
 
     viewRef.current = view;
+    if (session)
+      view.requestMeasure({
+        read: () => session.scrollTop,
+        write: (scrollTop) => {
+          view.scrollDOM.scrollTop = scrollTop;
+        },
+      });
     bridgedView = view;
     if (import.meta.env.DEV) {
       window.__HEBE_EDITOR_TEST__ = {
@@ -253,6 +273,8 @@ export function HybridEditor({
     return () => {
       if (import.meta.env.DEV) delete window.__HEBE_EDITOR_TEST__;
       removeTestBridgeListeners?.();
+      editorSessions.set(documentId, { state: view.state, scrollTop: view.scrollDOM.scrollTop });
+      editorSessions.prune(useAppStore.getState().tabs.map((tab) => tab.id));
       view.destroy();
       viewRef.current = null;
       bridgedView = null;
@@ -277,7 +299,10 @@ export function HybridEditor({
     const previewCompartment = previewCompartmentRef.current;
     if (!view || !previewCompartment || !isReady) return;
     view.dispatch({
-      effects: previewCompartment.reconfigure(hybridPreviewExtensions(sourceMode, mdPath ?? null)),
+      effects: [
+        previewCompartment.reconfigure(hybridPreviewExtensions(sourceMode, mdPath ?? null)),
+        pasteCompartmentRef.current.reconfigure(pasteImagePlugin(mdPath ?? null)),
+      ],
     });
   }, [sourceMode, mdPath, isReady]);
 

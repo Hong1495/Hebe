@@ -1,10 +1,10 @@
 [package]
 name = "hebe"
-version = "0.1.0"
+version = "1.1.0"
 description = "Hebe - A next-generation WYSIWYG Markdown editor"
 authors = ["Hebe Contributors"]
 license = "MIT"
-repository = ""
+repository = "https://github.com/Hong1495/Hebe"
 edition = "2021"
 rust-version = "1.77.2"
 
@@ -16,6 +16,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+tauri-plugin-updater = "2"
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
@@ -32,3 +33,10 @@ base64 = "0.22"
 
 [profile.release]
 strip = true
+
+# Keep proc-macro dylibs loadable by the macOS linker during release builds.
+[profile.release.build-override]
+strip = false
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSView", "NSButton"] }

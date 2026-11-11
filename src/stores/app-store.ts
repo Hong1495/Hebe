@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { isThemePreference, THEME_STORAGE_KEY, type ThemePreference } from "../lib/theme";
 
 export interface TabState {
+  id: string;
   path: string | null; // null = unsaved new document
   content: string;
   savedContent: string;
@@ -96,7 +97,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   sourceMode: false,
   theme: readStoredTheme(),
   zoom: readStoredZoom(),
-  tabs: [{ path: null, content: "", savedContent: "", dirty: false }],
+  tabs: [{ id: crypto.randomUUID(), path: null, content: "", savedContent: "", dirty: false }],
   activeTabIndex: 0,
   recentFiles: readStoredRecentFiles(),
 
@@ -139,7 +140,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         return {
           tabs: s.tabs.map((tab, index) =>
             index === s.activeTabIndex
-              ? { path, content, savedContent: content, dirty: false }
+              ? { id: crypto.randomUUID(), path, content, savedContent: content, dirty: false }
               : tab,
           ),
         };
@@ -148,19 +149,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       const firstTab = s.tabs[0];
       if (s.tabs.length === 1 && !firstTab.path && !firstTab.dirty) {
         return {
-          tabs: [{ path, content, savedContent: content, dirty: false }],
+          tabs: [{ id: crypto.randomUUID(), path, content, savedContent: content, dirty: false }],
           activeTabIndex: 0,
         };
       }
       return {
-        tabs: [...s.tabs, { path, content, savedContent: content, dirty: false }],
+        tabs: [
+          ...s.tabs,
+          { id: crypto.randomUUID(), path, content, savedContent: content, dirty: false },
+        ],
         activeTabIndex: s.tabs.length,
       };
     }),
 
   openNewTab: (content = "") =>
     set((s) => ({
-      tabs: [...s.tabs, { path: null, content, savedContent: content, dirty: false }],
+      tabs: [
+        ...s.tabs,
+        { id: crypto.randomUUID(), path: null, content, savedContent: content, dirty: false },
+      ],
       activeTabIndex: s.tabs.length,
     })),
 
@@ -168,7 +175,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((s) => {
       if (s.tabs.length <= 1) {
         return {
-          tabs: [{ path: null, content: "", savedContent: "", dirty: false }],
+          tabs: [
+            { id: crypto.randomUUID(), path: null, content: "", savedContent: "", dirty: false },
+          ],
           activeTabIndex: 0,
         };
       }

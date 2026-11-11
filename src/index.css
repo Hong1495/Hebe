@@ -1091,3 +1091,28 @@ input:focus-visible {
   scroll-padding-top: 45vh;
   scroll-padding-bottom: 45vh;
 }
+
+.update-settings { padding: 16px; display: grid; gap: 14px; font-size: 13px; }
+.update-hint { color: var(--text-secondary); }
+.update-notes { white-space: pre-wrap; max-height: 180px; overflow: auto; font: inherit; }
+.update-actions { display: flex; gap: 8px; }
+.update-actions button { border: 1px solid var(--border); border-radius: 6px; padding: 7px 12px; background: var(--bg); color: var(--text); }
+.update-actions button:disabled { opacity: 0.5; }
+
+/* Update control follows native window-button geometry, as in Bee. */
+.update-indicator { position:absolute; z-index:20; padding:0; border:0; border-radius:50%; display:grid; place-items:center; background:#ff963b; color:#6d3304; box-shadow:inset 0 0 0 .5px #b66a2680; }
+.update-indicator svg { width:62%; height:62%; stroke-width:1.75; }
+.update-indicator:hover { background:#ffad55; color:#532600; }
+[data-theme=dark] .update-indicator { background:#f39436; color:#422100; }
+.update-popover { position:absolute; z-index:30; width:296px; max-width:calc(100vw - 24px); padding:16px; border-radius:10px; color:var(--text); background:var(--bg); box-shadow:0 12px 35px #0003,inset 0 0 0 .5px var(--border); text-align:left; }
+.update-popover header { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:13px; }
+.update-popover header button { display:grid; place-items:center; padding:2px; color:var(--text-secondary); }
+.update-popover p { font-size:12px; line-height:1.6; margin:8px 0; }
+.update-subtitle { color:var(--text-secondary); }
+.update-popover .update-notes { max-height:200px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; line-height:1.7; margin:12px 0; }
+.update-popover progress { width:100%; height:4px; accent-color:var(--text); }
+.update-action { width:100%; margin-top:8px; }
+.update-action:disabled { opacity:.5; cursor:default; }
+
+.update-popover .update-action { padding: 9px 12px; border-radius: 6px; background: var(--text); color: var(--bg); }
+.update-popover header button { border: 0; background: transparent; }

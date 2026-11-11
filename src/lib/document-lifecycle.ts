@@ -16,9 +16,10 @@ export async function saveTabAt(index: number): Promise<boolean> {
   try {
     if (tab.path) {
       await writeMarkdownFile(tab.path, tab.content);
-      const latest = useAppStore.getState().tabs[index];
+      const latestIndex = useAppStore.getState().tabs.findIndex((item) => item.id === tab.id);
+      const latest = useAppStore.getState().tabs[latestIndex];
       if (latest?.path === tab.path && latest.content === tab.content) {
-        useAppStore.getState().markTabSaved(index);
+        useAppStore.getState().markTabSaved(latestIndex);
       }
       return true;
     }
@@ -30,9 +31,10 @@ export async function saveTabAt(index: number): Promise<boolean> {
     if (!savePath) return false;
 
     await writeMarkdownFile(savePath, tab.content);
-    const latest = useAppStore.getState().tabs[index];
+    const latestIndex = useAppStore.getState().tabs.findIndex((item) => item.id === tab.id);
+    const latest = useAppStore.getState().tabs[latestIndex];
     if (latest?.content === tab.content) {
-      useAppStore.getState().markTabSaved(index, savePath);
+      useAppStore.getState().markTabSaved(latestIndex, savePath);
       useAppStore.getState().addRecentFile(savePath);
     }
     return true;
@@ -46,44 +48,56 @@ export async function saveActiveTab(): Promise<boolean> {
   return saveTabAt(useAppStore.getState().activeTabIndex);
 }
 
-export async function closeTabWithPrompt(index: number): Promise<boolean> {
+let lifecycleBusy = false;
+
+function tabIndex(id: string): number {
+  return useAppStore.getState().tabs.findIndex((tab) => tab.id === id);
+}
+
+async function settleTab(id: string): Promise<boolean> {
+  let index = tabIndex(id);
   const tab = useAppStore.getState().tabs[index];
-  if (!tab) return true;
-
-  if (tab.dirty) {
-    const choice = await askDirtyChoice(tab);
-    if (choice === "cancel") return false;
-    if (choice === "save") {
-      if (!(await saveTabAt(index))) return false;
-      if (useAppStore.getState().tabs[index]?.dirty) return false;
-    }
+  if (!tab?.dirty) return true;
+  useAppStore.getState().setActiveTab(index);
+  const choice = await askDirtyChoice(tab);
+  if (choice === "cancel") return false;
+  index = tabIndex(id);
+  if (index < 0) return true;
+  if (choice === "save") {
+    if (!(await saveTabAt(index))) return false;
+    return !useAppStore.getState().tabs[tabIndex(id)]?.dirty;
   }
-
-  useAppStore.getState().closeTab(index);
+  useAppStore.getState().discardTabChanges(index);
   return true;
 }
 
-export async function prepareWindowClose(): Promise<boolean> {
-  let index = 0;
-  while (index < useAppStore.getState().tabs.length) {
-    const tab = useAppStore.getState().tabs[index];
-    if (!tab?.dirty) {
-      index += 1;
-      continue;
-    }
-
-    useAppStore.getState().setActiveTab(index);
-    const choice = await askDirtyChoice(tab);
-    if (choice === "cancel") return false;
-    if (choice === "save") {
-      if (!(await saveTabAt(index))) return false;
-      if (useAppStore.getState().tabs[index]?.dirty) return false;
-    }
-    if (choice === "discard") useAppStore.getState().discardTabChanges(index);
-    index += 1;
+export async function closeTabWithPrompt(index: number): Promise<boolean> {
+  if (lifecycleBusy) return false;
+  const tab = useAppStore.getState().tabs[index];
+  if (!tab) return true;
+  lifecycleBusy = true;
+  try {
+    if (!(await settleTab(tab.id))) return false;
+    const currentIndex = tabIndex(tab.id);
+    if (currentIndex >= 0) useAppStore.getState().closeTab(currentIndex);
+    return true;
+  } finally {
+    lifecycleBusy = false;
   }
+}
 
-  return true;
+export async function prepareWindowClose(): Promise<boolean> {
+  if (lifecycleBusy) return false;
+  lifecycleBusy = true;
+  try {
+    for (const tab of useAppStore.getState().tabs) {
+      if (!(await settleTab(tab.id))) return false;
+    }
+    // Edits or a new tab may have arrived while a native dialog was open.
+    return !useAppStore.getState().tabs.some((tab) => tab.dirty);
+  } finally {
+    lifecycleBusy = false;
+  }
 }
 
 async function askDirtyChoice(tab: TabState): Promise<DirtyChoice> {

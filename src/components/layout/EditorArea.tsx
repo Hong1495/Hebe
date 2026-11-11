@@ -117,12 +117,13 @@ export function EditorArea({ onEditorViewReady }: Props) {
   useEffect(() => {
     if (!activeTabDirty || !currentFilePath) return;
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    const saveIndex = activeTabIndex;
+    const saveId = activeTab.id;
     const savePath = currentFilePath;
     const saveContent = currentContent;
     autoSaveTimerRef.current = setTimeout(async () => {
       try {
         await writeMarkdownFile(savePath, saveContent);
+        const saveIndex = useAppStore.getState().tabs.findIndex((tab) => tab.id === saveId);
         const latestTab = useAppStore.getState().tabs[saveIndex];
         if (latestTab?.path === savePath && latestTab.content === saveContent) {
           markTabSaved(saveIndex);
@@ -134,7 +135,7 @@ export function EditorArea({ onEditorViewReady }: Props) {
     return () => {
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     };
-  }, [activeTabDirty, activeTabIndex, currentContent, currentFilePath, markTabSaved]);
+  }, [activeTabDirty, activeTab.id, currentContent, currentFilePath, markTabSaved]);
 
   // File watching
   useEffect(() => {
@@ -274,7 +275,8 @@ export function EditorArea({ onEditorViewReady }: Props) {
       <div className="flex-1 overflow-hidden">
         <HybridEditor
           mdPath={currentFilePath}
-          key={`${activeTabIndex}-${activeTab?.path ?? "new"}`}
+          key={activeTab.id}
+          documentId={activeTab.id}
           initialContent={currentContent}
           onContentChange={handleContentChange}
           onNewDocument={() => openNewTab("")}

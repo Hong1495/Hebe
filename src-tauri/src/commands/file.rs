@@ -1,15 +1,34 @@
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use serde::Serialize;
 use std::time::UNIX_EPOCH;
+use tauri::Manager;
 
-#[tauri::command]
-pub fn read_markdown_file(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {e}"))
+fn allow_document_images(app: &tauri::AppHandle, path: &str) -> Result<(), String> {
+    let absolute = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
+    if let Some(directory) = absolute.parent() {
+        app.asset_protocol_scope()
+            .allow_directory(directory, true)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
-pub fn write_markdown_file(path: String, content: String) -> Result<(), String> {
-    std::fs::write(&path, &content).map_err(|e| format!("Failed to write file: {e}"))
+pub fn read_markdown_file(app: tauri::AppHandle, path: String) -> Result<String, String> {
+    let content =
+        std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {e}"))?;
+    allow_document_images(&app, &path)?;
+    Ok(content)
+}
+
+#[tauri::command]
+pub fn write_markdown_file(
+    app: tauri::AppHandle,
+    path: String,
+    content: String,
+) -> Result<(), String> {
+    std::fs::write(&path, &content).map_err(|e| format!("Failed to write file: {e}"))?;
+    allow_document_images(&app, &path)
 }
 
 #[tauri::command]

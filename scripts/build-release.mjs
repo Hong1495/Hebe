@@ -1,0 +1,28 @@
+// Adapted from Hong1495/Bee (MIT); see THIRD_PARTY_NOTICES.md.
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import {spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+const config=JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json','utf8'));
+const version=config.version;
+if(process.platform!=='darwin'||process.arch!=='arm64')throw new Error('Build this release on an Apple Silicon Mac.');
+const key=process.env.TAURI_SIGNING_PRIVATE_KEY||path.join(os.homedir(),'.config/hebe/release-keys/updater.key');
+if(!process.env.TAURI_SIGNING_PRIVATE_KEY&&!fs.existsSync(key))throw new Error('Missing updater private key. See docs/releases.md.');
+const result=spawnSync('npm',['run','tauri','--','build'],{stdio:'inherit',env:{...process.env,TAURI_SIGNING_PRIVATE_KEY:key,TAURI_SIGNING_PRIVATE_KEY_PASSWORD:process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD||''}});
+if(result.status!==0)process.exit(result.status||1);
+const root='src-tauri/target/release/bundle';
+const signatureCheck=spawnSync('codesign',['--verify','--deep','--strict','--verbose=2',`${root}/macos/Hebe.app`],{stdio:'inherit'});
+if(signatureCheck.status!==0)throw new Error('App bundle signature validation failed; do not publish.');
+const archive=`Hebe_${version}_aarch64.app.tar.gz`;
+const dmg=`Hebe_${version}_aarch64.dmg`;
+const out=`release/${version}`;fs.mkdirSync(out,{recursive:true});
+fs.copyFileSync(`${root}/macos/Hebe.app.tar.gz`,`${out}/${archive}`);
+fs.copyFileSync(`${root}/macos/Hebe.app.tar.gz.sig`,`${out}/${archive}.sig`);
+fs.copyFileSync(`${root}/dmg/${dmg}`,`${out}/${dmg}`);
+const signature=fs.readFileSync(`${out}/${archive}.sig`,'utf8').trim();
+const notes=fs.readFileSync('docs/release-notes.md','utf8').trim();
+fs.writeFileSync(`${out}/latest.json`,JSON.stringify({version,notes,pub_date:new Date().toISOString(),platforms:{'darwin-aarch64':{signature,url:`https://github.com/Hong1495/Hebe/releases/download/v${version}/${archive}`}}},null,2)+'\n');
+const names=[dmg,archive,`${archive}.sig`,'latest.json'];
+fs.writeFileSync(`${out}/SHA256SUMS`,names.map(name=>`${createHash('sha256').update(fs.readFileSync(`${out}/${name}`)).digest('hex')}  ${name}`).join('\n')+'\n');
+console.log(`Release assets ready: ${out}`);

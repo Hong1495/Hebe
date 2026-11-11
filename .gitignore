@@ -30,3 +30,14 @@ src-tauri/target
 *.dmg
 *.app
 
+
+# Local signed release assets and secrets
+release/
+*.key
+.env
+.env.*
+
+# Local agent configuration
+.claude/
+.codex/
+CLAUDE.md

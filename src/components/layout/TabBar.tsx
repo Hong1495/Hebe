@@ -22,7 +22,7 @@ export function TabBar({ onCloseTab }: Props) {
 
           return (
             <button
-              key={`${tab.path ?? "new"}-${i}`}
+              key={tab.id}
               type="button"
               onMouseDown={(e) => {
                 if (e.button !== 0) return;

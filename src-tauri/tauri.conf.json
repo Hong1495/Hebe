@@ -33,13 +33,18 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["$HOME/**"]
+        "scope": [
+          "$HOME/**"
+        ]
       }
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "app",
+      "dmg"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -49,27 +54,50 @@
     ],
     "fileAssociations": [
       {
-        "ext": ["md", "markdown", "mdown", "mkd", "mkdn"],
+        "ext": [
+          "md",
+          "markdown",
+          "mdown",
+          "mkd",
+          "mkdn"
+        ],
         "name": "Markdown Document",
         "role": "Editor",
         "mimeType": "text/markdown",
         "rank": "Default",
-        "contentTypes": ["net.daringfireball.markdown"]
+        "contentTypes": [
+          "net.daringfireball.markdown"
+        ]
       },
       {
-        "ext": ["mdx"],
+        "ext": [
+          "mdx"
+        ],
         "name": "MDX Document",
         "role": "Editor",
         "mimeType": "text/markdown",
         "rank": "Default",
         "exportedType": {
           "identifier": "app.hebe.mdx",
-          "conformsTo": ["public.text", "public.data"]
+          "conformsTo": [
+            "public.text",
+            "public.data"
+          ]
         }
       }
     ],
     "macOS": {
-      "minimumSystemVersion": "13.0"
+      "minimumSystemVersion": "13.0",
+      "signingIdentity": "-"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMwNEQ1NjVGMjdENTc1QzYKUldUR2RkVW5YMVpOTU1kUWtyWlJRbk54c1duV1Juc3VSVnpGZzVZQ3AxSzZvR04xRGVIaFVDeDMK",
+      "endpoints": [
+        "https://github.com/Hong1495/Hebe/releases/latest/download/latest.json"
+      ]
     }
   }
 }

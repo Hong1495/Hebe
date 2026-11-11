@@ -1,12 +1,15 @@
+import { invoke } from "@tauri-apps/api/core";
+import { useAppUpdates } from "./lib/use-app-updates";
 import { EditorView } from "@codemirror/view";
 import { setTheme as setAppTheme } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EditorArea } from "./components/layout/EditorArea";
 import { OutlinePanel } from "./components/layout/OutlinePanel";
 import { SettingsDialog } from "./components/layout/SettingsPanel";
 import { StatusBar } from "./components/layout/StatusBar";
+import { UpdateIndicator } from "./components/layout/UpdateIndicator";
 import { TabBar } from "./components/layout/TabBar";
 import { closeTabWithPrompt, prepareWindowClose } from "./lib/document-lifecycle";
 import { hideMainWindow, isTauriRuntime, readMarkdownFile, takePendingOpenFiles } from "./lib/ipc";
@@ -27,6 +30,13 @@ async function setCheckedMenuItem(item: unknown, checked: boolean): Promise<void
 }
 
 function App() {
+  const updates = useAppUpdates();
+  const [updateOpen, setUpdateOpen] = useState(false);
+  useEffect(() => {
+    const open = () => setUpdateOpen(true);
+    window.addEventListener("hebe-show-update-popover", open);
+    return () => window.removeEventListener("hebe-show-update-popover", open);
+  }, []);
   const outlineVisible = useAppStore((s) => s.outlineVisible);
   const settingsVisible = useAppStore((s) => s.settingsVisible);
   const outlineWidth = useAppStore((s) => s.outlineWidth);
@@ -185,6 +195,28 @@ function App() {
   useEffect(() => {
     if (!isTauriRuntime()) return;
     let cancelled = false;
+    let stop: (() => void) | undefined;
+    void listen("request-quit", async () => {
+      if (windowCloseInProgressRef.current) return;
+      windowCloseInProgressRef.current = true;
+      try {
+        if (await prepareWindowClose()) await invoke("quit_app");
+      } finally {
+        windowCloseInProgressRef.current = false;
+      }
+    }).then((unlisten) => {
+      if (cancelled) unlisten();
+      else stop = unlisten;
+    });
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let cancelled = false;
 
     const syncMenuChecks = async () => {
       try {
@@ -280,6 +312,7 @@ function App() {
 
   return (
     <div className="app-shell" style={{ background: "var(--bg)", color: "var(--text)" }}>
+      <UpdateIndicator updater={updates} open={updateOpen} setOpen={setUpdateOpen} />
       <TabBar onCloseTab={(index) => closeTabWithPrompt(index)} />
       <div className="app-body" style={{ gridTemplateColumns: gridCols }}>
         <div className="app-main">
@@ -301,7 +334,7 @@ function App() {
           </div>
         )}
       </div>
-      <SettingsDialog open={settingsVisible} />
+      <SettingsDialog open={settingsVisible} updates={updates} />
       <StatusBar />
     </div>
   );
