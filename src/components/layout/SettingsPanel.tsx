@@ -21,6 +21,8 @@ export function SettingsDialog({ open, updates }: SettingsDialogProps) {
   const zoomOut = useAppStore((s) => s.zoomOut);
   const resetZoom = useAppStore((s) => s.resetZoom);
   const toggleSettings = useAppStore((s) => s.toggleSettings);
+  const codeWrap = useAppStore((s) => s.codeWrap);
+  const toggleCodeWrap = useAppStore((s) => s.toggleCodeWrap);
 
   useEffect(() => {
     if (!open) return;
@@ -245,6 +247,10 @@ export function SettingsDialog({ open, updates }: SettingsDialogProps) {
                     aria-label="Editor zoom"
                     onChange={(event) => setZoom(Number(event.currentTarget.value))}
                   />
+                  <label className="settings-row">
+                    <span className="settings-label">Wrap long lines in code previews</span>
+                    <input type="checkbox" checked={codeWrap} onChange={toggleCodeWrap} />
+                  </label>
                 </section>
               </>
             )}

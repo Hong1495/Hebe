@@ -20,6 +20,7 @@ interface AppState {
   focusMode: boolean;
   typewriterMode: boolean;
   sourceMode: boolean;
+  codeWrap: boolean;
   theme: ThemePreference;
   zoom: number;
 
@@ -39,6 +40,7 @@ interface AppState {
   toggleFocusMode: () => void;
   toggleTypewriterMode: () => void;
   toggleSourceMode: () => void;
+  toggleCodeWrap: () => void;
   setTheme: (theme: ThemePreference) => void;
   setZoom: (zoom: number) => void;
   resetZoom: () => void;
@@ -109,6 +111,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   focusMode: false,
   typewriterMode: false,
   sourceMode: false,
+  codeWrap: typeof localStorage !== "undefined" ? localStorage.getItem("hebe.codeWrap") !== "false" : true,
   theme: readStoredTheme(),
   zoom: readStoredZoom(),
   tabs: recovered?.tabs ?? [
@@ -132,6 +135,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   toggleFocusMode: () => set((s) => ({ focusMode: !s.focusMode })),
   toggleTypewriterMode: () => set((s) => ({ typewriterMode: !s.typewriterMode })),
   toggleSourceMode: () => set((s) => ({ sourceMode: !s.sourceMode })),
+  toggleCodeWrap: () =>
+    set((s) => {
+      const codeWrap = !s.codeWrap;
+      if (typeof localStorage !== "undefined") localStorage.setItem("hebe.codeWrap", String(codeWrap));
+      return { codeWrap };
+    }),
   setTheme: (theme) => {
     if (typeof localStorage !== "undefined") localStorage.setItem(THEME_STORAGE_KEY, theme);
     set({ theme });

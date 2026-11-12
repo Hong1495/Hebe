@@ -163,6 +163,19 @@ function hideMarkDeco(state: EditorState): DecorationSet {
 
   for (const line of scanMarkdownLineDecorations(state.doc.toString(), revealLines)) {
     for (const className of line.classes) addLineClass(line.lineFrom, className, decorations);
+    if (line.classes.includes("md-list-line")) {
+      const prefix = state.doc.sliceString(line.lineFrom, line.lineTo).match(/^(\s*)([-+*]|\d+[.)])([ \t]+)(\[[ xX]\][ \t]+)?/);
+      if (prefix) {
+        const indent = prefix[1].replace(/\t/g, "    ").length;
+        const marker = line.replacements.find((replacement) => replacement.kind === "listMarker");
+        const width = marker
+          ? `calc(${indent}ch + ${Math.max(1.35, prefix[2].length * 0.65)}em)`
+          : `${prefix[0].replace(/\t/g, "    ").length}ch`;
+        decorations.push({ from: line.lineFrom, to: line.lineFrom,
+          deco: Decoration.line({ attributes: { style: `padding-left:${width};text-indent:calc(-1 * ${width})` } }),
+        });
+      }
+    }
     for (const replacement of line.replacements) addReplacement(replacement, decorations);
     for (const span of line.inlineSpans) {
       addMark(span.contentFrom, span.contentTo, inlineClassName(span.kind), decorations);
@@ -564,6 +577,7 @@ export const hybridBaseTheme = EditorView.baseTheme({
   },
   ".cm-line": {
     padding: "1px 0",
+    overflowWrap: "anywhere",
   },
   ".cm-line.cm-activeLine": {
     background: "transparent",
@@ -599,8 +613,9 @@ export const hybridBaseTheme = EditorView.baseTheme({
   },
   "&.cm-editor .cm-content": {
     fontFamily: "var(--font-sans)",
-    width: "min(var(--editor-width), calc(100% - 112px))",
-    maxWidth: "calc(100% - 112px)",
+    width: "min(var(--editor-width), calc(100% - clamp(32px, 10%, 112px)))",
+    minWidth: "0",
+    flex: "0 0 auto",
     margin: "0 auto",
     padding: "52px 0 110px",
     boxSizing: "border-box",
@@ -664,6 +679,7 @@ export const hybridBaseTheme = EditorView.baseTheme({
     minWidth: "1.35em",
     color: "var(--md-muted)",
     fontWeight: "500",
+    textIndent: "0",
   },
   ".cm-list-marker.is-checked": {
     color: "var(--md-link)",

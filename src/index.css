@@ -965,7 +965,33 @@ input:focus-visible {
   font-size: 0.9em;
   line-height: 1.62;
   tab-size: 2;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.cm-code-wrap-enabled .cm-code-block-widget {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Source lines stay soft-wrapped while editing; the preference controls code previews. */
+.cm-code-block-widget,
+.cm-markdown-table-wrap,
+.cm-math-block {
+  scrollbar-width: thin;
+}
+
+.cm-code-block-widget::-webkit-scrollbar,
+.cm-markdown-table-wrap::-webkit-scrollbar,
+.cm-math-block::-webkit-scrollbar {
+  height: 8px;
+}
+
+.cm-code-block-widget::-webkit-scrollbar-thumb,
+.cm-markdown-table-wrap::-webkit-scrollbar-thumb,
+.cm-math-block::-webkit-scrollbar-thumb {
+  background: var(--md-mark);
+  border-radius: 4px;
 }
 
 .cm-code-block-widget code {
@@ -980,6 +1006,8 @@ input:focus-visible {
 
 .cm-math-block {
   display: block;
+  max-width: 100%;
+  min-width: 0;
   padding: 12px 0;
   overflow-x: auto;
   text-align: center;
@@ -990,6 +1018,8 @@ input:focus-visible {
 }
 
 .cm-mermaid-container {
+  max-width: 100%;
+  overflow-x: auto;
   margin: 12px 0;
   padding: 16px;
   background: var(--md-code-block-bg);
@@ -1020,6 +1050,8 @@ input:focus-visible {
 .cm-image-container img {
   max-width: 100%;
   max-height: 400px;
+  height: auto;
+  object-fit: contain;
   border-radius: 6px;
   display: block;
 }
@@ -1033,7 +1065,7 @@ input:focus-visible {
 
 .cm-markdown-table {
   width: 100%;
-  min-width: max-content;
+  table-layout: fixed;
   border-collapse: collapse;
   border-spacing: 0;
   color: var(--md-text);
@@ -1046,7 +1078,8 @@ input:focus-visible {
   padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--md-rule) 86%, transparent);
   vertical-align: top;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .cm-markdown-table th {
@@ -1062,7 +1095,12 @@ input:focus-visible {
 .cm-markdown-table-cell-input {
   display: block;
   width: 100%;
-  min-width: 6ch;
+  min-width: 0;
+  height: 100%;
+  resize: none;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   padding: 0;
   border: 0;
   outline: none;
@@ -1070,6 +1108,23 @@ input:focus-visible {
   background: transparent;
   font: inherit;
   line-height: inherit;
+}
+
+.cm-table-cell-field {
+  position: relative;
+  min-width: 0;
+}
+
+.cm-table-cell-mirror {
+  visibility: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-height: 1.55em;
+}
+
+.cm-table-cell-field textarea {
+  position: absolute;
+  inset: 0;
 }
 
 .cm-markdown-table-cell-input:focus {

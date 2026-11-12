@@ -10,6 +10,11 @@ const TOOL_DIRS: &[&str] = &[
     "/sbin",
 ];
 
+const PDF_CODE_WRAP: &str = r"\usepackage{fvextra}
+\fvset{breaklines=true,breakanywhere=true,breaknonspaceingroup=true}
+\RecustomVerbatimEnvironment{verbatim}{Verbatim}{}
+";
+
 fn tool_search_dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|path| std::env::split_paths(&path).collect())
@@ -124,6 +129,15 @@ fn export_sync(
         .tempfile_in(parent)
         .map_err(|e| e.to_string())?;
     let options = options.unwrap_or_default();
+    // Keep the header alive until Pandoc exits; never inject presentation settings
+    // into the user's Markdown or YAML metadata.
+    let pdf_header = if format == "pdf" {
+        let file = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
+        std::fs::write(file.path(), PDF_CODE_WRAP).map_err(|e| e.to_string())?;
+        Some(file)
+    } else {
+        None
+    };
 
     let pandoc_path = resolve_tool("pandoc").ok_or_else(|| {
         "Pandoc is not installed. Install it from https://pandoc.org/installing.html".to_string()
@@ -161,6 +175,8 @@ fn export_sync(
         })?;
 
         command
+            .arg("--include-in-header")
+            .arg(pdf_header.as_ref().unwrap().path())
             .arg(format!("--pdf-engine={}", xelatex_path.to_string_lossy()))
             .arg("-V")
             .arg("mainfont=PingFang SC")
@@ -300,6 +316,44 @@ mod tests {
             }
         }
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 5);
+    }
+
+    #[test]
+    fn pdf_keeps_long_code_lines_inside_the_page() {
+        if resolve_tool("pandoc").is_none() || resolve_tool("xelatex").is_none() {
+            return;
+        }
+        let Some(extractor) = resolve_tool("pdftotext") else {
+            return;
+        };
+        let root = tempfile::tempdir().unwrap();
+        let document = root.path().join("wide.md");
+        let output = root.path().join("wide.pdf");
+        let content = format!("# Long lines\n\n```js\nconst text = \"{} HIGHLIGHT_END\";\n```\n\n```\n{} PLAIN_END\n```\n", "abcdefghij".repeat(40), "abcdefghij".repeat(40));
+        std::fs::write(&document, &content).unwrap();
+        export_sync(
+            content,
+            document.to_string_lossy().into_owned(),
+            "pdf".into(),
+            output.to_string_lossy().into_owned(),
+            None,
+        )
+        .unwrap();
+        let text = std::process::Command::new(extractor)
+            .arg(&output)
+            .arg("-")
+            .output()
+            .unwrap();
+        assert!(text.status.success());
+        let text = String::from_utf8_lossy(&text.stdout);
+        assert!(
+            text.contains("HIGHLIGHT_END"),
+            "highlighted code must not be clipped"
+        );
+        assert!(text.contains("PLAIN_END"), "plain code must not be clipped");
+        if let Ok(path) = std::env::var("HEBE_WIDE_PDF_REVIEW_PATH") {
+            std::fs::copy(&output, path).unwrap();
+        }
     }
 
     #[test]

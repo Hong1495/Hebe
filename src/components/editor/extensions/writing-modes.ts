@@ -10,7 +10,7 @@ export const typewriterExtension = ViewPlugin.fromClass(
       this.center();
     }
     update(update: ViewUpdate) {
-      if (update.docChanged || update.selectionSet) this.center();
+      if (update.docChanged || update.selectionSet || update.geometryChanged) this.center();
     }
     center() {
       cancelAnimationFrame(this.frame);

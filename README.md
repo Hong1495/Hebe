@@ -35,7 +35,7 @@ Choose **Hebe → Check for Updates…** or **Settings → Updates** to check ma
 
 ## Export dependencies
 
-Editing needs no additional tools. Export uses [Pandoc](https://pandoc.org/installing.html); PDF also needs [MacTeX/BasicTeX](https://www.tug.org/mactex/) or TeX Live with `xelatex` and the required LaTeX packages. The macOS PDF template uses PingFang SC for Chinese text.
+Editing needs no additional tools. Export uses [Pandoc](https://pandoc.org/installing.html); PDF also needs [MacTeX/BasicTeX](https://www.tug.org/mactex/) or TeX Live with `xelatex` and the required LaTeX packages, including `fvextra` for long code lines. The macOS PDF template uses PingFang SC for Chinese text.
 
 ```bash
 brew install pandoc

@@ -269,7 +269,7 @@ function App() {
 
   const gridCols = useMemo(() => {
     const cols = [];
-    cols.push("1fr");
+    cols.push("minmax(0, 1fr)");
     if (outlineVisible) cols.push("4px", `${outlineWidth}px`);
     return cols.join(" ");
   }, [outlineVisible, outlineWidth]);

@@ -6,6 +6,7 @@ import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
 import {
   Annotation,
   Compartment,
+  Prec,
   EditorState,
   type Extension,
   StateEffect,
@@ -76,6 +77,7 @@ interface HybridEditorProps {
   focusMode?: boolean;
   typewriterMode?: boolean;
   sourceMode?: boolean;
+  codeWrap?: boolean;
   onEditorView?: (view: EditorView) => void;
   mdPath?: string | null;
 }
@@ -90,6 +92,7 @@ export function HybridEditor({
   focusMode = false,
   typewriterMode = false,
   sourceMode = false,
+  codeWrap = true,
   onEditorView,
   mdPath,
 }: HybridEditorProps) {
@@ -98,6 +101,8 @@ export function HybridEditor({
   const previewCompartmentRef = useRef<Compartment | null>(null);
   const writingCompartmentRef = useRef(new Compartment());
   const pasteCompartmentRef = useRef(new Compartment());
+  const codeWrapCompartmentRef = useRef(new Compartment());
+  const focusCompartmentRef = useRef(new Compartment());
   const [isReady, setIsReady] = useState(false);
 
   if (!previewCompartmentRef.current) {
@@ -132,6 +137,14 @@ export function HybridEditor({
     });
 
     const editorKeymap = keymap.of([
+      {
+        key: "Mod-/",
+        run: () => {
+          useAppStore.getState().toggleSourceMode();
+          return true;
+        },
+        preventDefault: true,
+      },
       {
         key: "Mod-n",
         run: () => {
@@ -178,6 +191,13 @@ export function HybridEditor({
 
     const extensions: Extension[] = [
       markdown({ base: markdownLanguage }),
+      EditorView.lineWrapping,
+      codeWrapCompartmentRef.current.of(EditorView.editorAttributes.of({
+        class: codeWrap ? "cm-code-wrap-enabled" : "",
+      })),
+      focusCompartmentRef.current.of(EditorView.editorAttributes.of({
+        class: focusMode ? "cm-focus-mode" : "",
+      })),
       history(),
       pendingImages,
       EditorView.domEventHandlers({
@@ -204,11 +224,14 @@ export function HybridEditor({
         },
       }),
       highlightActiveLine(),
-      writingCompartmentRef.current.of(typewriterMode ? typewriterExtension : []),
+      writingCompartmentRef.current.of(typewriterMode ? [
+        typewriterExtension,
+        EditorView.editorAttributes.of({ class: "cm-typewriter-mode" }),
+      ] : []),
       closeBrackets(),
       highlightSelectionMatches(),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, ...closeBracketsKeymap]),
-      editorKeymap,
+      Prec.highest(editorKeymap),
 
       hybridBaseTheme,
       editorFocusPlugin,
@@ -312,17 +335,27 @@ export function HybridEditor({
   }, []);
 
   useEffect(() => {
-    const dom = viewRef.current?.dom;
-    if (!dom) return;
-    dom.classList.toggle("cm-focus-mode", focusMode);
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({ effects: focusCompartmentRef.current.reconfigure(
+      EditorView.editorAttributes.of({ class: focusMode ? "cm-focus-mode" : "" }),
+    ) });
   }, [focusMode]);
 
   useEffect(() => {
-    const dom = viewRef.current?.dom;
-    if (!dom) return;
-    dom.classList.toggle("cm-typewriter-mode", typewriterMode);
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({ effects: codeWrapCompartmentRef.current.reconfigure(
+      EditorView.editorAttributes.of({ class: codeWrap ? "cm-code-wrap-enabled" : "" }),
+    ) });
+  }, [codeWrap]);
+
+  useEffect(() => {
     viewRef.current?.dispatch({
-      effects: writingCompartmentRef.current.reconfigure(typewriterMode ? typewriterExtension : []),
+      effects: writingCompartmentRef.current.reconfigure(typewriterMode ? [
+        typewriterExtension,
+        EditorView.editorAttributes.of({ class: "cm-typewriter-mode" }),
+      ] : []),
     });
   }, [typewriterMode]);
 

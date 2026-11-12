@@ -45,6 +45,7 @@ export function EditorArea({ onEditorViewReady }: Props) {
   const updateActiveContent = useAppStore((s) => s.updateActiveContent);
   const focusMode = useAppStore((s) => s.focusMode);
   const typewriterMode = useAppStore((s) => s.typewriterMode);
+  const codeWrap = useAppStore((s) => s.codeWrap);
   const sourceMode = useAppStore((s) => s.sourceMode);
 
   const editorViewRef = useRef<EditorView | null>(null);
@@ -319,6 +320,7 @@ export function EditorArea({ onEditorViewReady }: Props) {
           }}
           focusMode={focusMode}
           typewriterMode={typewriterMode}
+          codeWrap={codeWrap}
           sourceMode={sourceMode}
         />
       </div>

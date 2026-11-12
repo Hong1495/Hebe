@@ -35,7 +35,7 @@ Hebe 是一款受 Typora 启发的开源 Markdown 编辑器：平时阅读排版
 
 ## 导出
 
-日常编辑无需安装额外工具。导出需要 [Pandoc](https://pandoc.org/installing.html)，PDF 还需要 XeLaTeX（MacTeX / BasicTeX / TeX Live 及所需宏包）。中文 PDF 使用系统苹方字体。
+日常编辑无需安装额外工具。导出需要 [Pandoc](https://pandoc.org/installing.html)，PDF 还需要 XeLaTeX（MacTeX / BasicTeX / TeX Live 及所需宏包，包含用于长代码折行的 `fvextra`）。中文 PDF 使用系统苹方字体。
 
 ```bash
 brew install pandoc

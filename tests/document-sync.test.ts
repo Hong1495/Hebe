@@ -55,3 +55,18 @@ it("defers disk reload and autosave while IME composition is active", async () =
   await vi.advanceTimersByTimeAsync(3000);
   expect(mocks.write).toHaveBeenCalledTimes(2);
 });
+
+it("does not save or dirty clean documents when presentation preferences change", async () => {
+  useAppStore.getState().setTabContent(0, "original");
+  useAppStore.getState().setTabContent(1, "original");
+  const tabs = useAppStore.getState().tabs;
+  stop = startDocumentSync();
+  useAppStore.getState().setZoom(160);
+  useAppStore.getState().toggleCodeWrap();
+  useAppStore.getState().toggleSourceMode();
+  useAppStore.getState().toggleOutline();
+  useAppStore.getState().setOutlineWidth(320);
+  await vi.advanceTimersByTimeAsync(4000);
+  expect(useAppStore.getState().tabs).toEqual(tabs);
+  expect(mocks.write).not.toHaveBeenCalled();
+});

@@ -456,6 +456,7 @@ class TableWidget extends WidgetType {
 
     const table = document.createElement("table");
     table.className = "cm-markdown-table";
+    table.style.minWidth = `${this.block.table.headers.length * 9}em`;
 
     const thead = document.createElement("thead");
     const headerRow = document.createElement("tr");
@@ -517,9 +518,17 @@ function makeTableCellInput(
   target: MarkdownTableCellTarget,
   value: string,
 ): void {
-  const input = document.createElement("input");
+  const field = document.createElement("div");
+  field.className = "cm-table-cell-field";
+  const mirror = document.createElement("div");
+  mirror.className = "cm-table-cell-mirror";
+  mirror.setAttribute("aria-hidden", "true");
+  mirror.textContent = value + "\n";
+  const input = document.createElement("textarea");
   input.className = "cm-markdown-table-cell-input";
-  input.type = "text";
+  input.rows = 1;
+  input.wrap = "soft";
+  input.setAttribute("aria-label", `Table ${target.rowKind} row ${target.rowIndex + 1}, column ${target.cellIndex + 1}`);
   input.value = value;
   input.spellcheck = true;
   input.dataset.tableRowKind = target.rowKind;
@@ -529,7 +538,11 @@ function makeTableCellInput(
   const stop = (event: Event) => event.stopPropagation();
   input.addEventListener("mousedown", stop);
   input.addEventListener("click", stop);
-  input.addEventListener("input", stop);
+  input.addEventListener("input", (event) => {
+    stop(event);
+    mirror.textContent = input.value + "\n";
+    view.requestMeasure();
+  });
   input.addEventListener("focus", () => {
     const pos = markdownBlockPositionFromHit(view.state.doc.toString(), block, {
       kind: "tableCell",
@@ -702,7 +715,7 @@ function makeTableCellInput(
       }
       return;
     }
-    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+    if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
       event.preventDefault();
       const direction = event.key === "ArrowUp" ? "up" : "down";
       const nextTarget = navigateMarkdownTableCell(block, target, direction);
@@ -735,7 +748,8 @@ function makeTableCellInput(
     }
   });
 
-  cell.appendChild(input);
+  field.append(mirror, input);
+  cell.appendChild(field);
 }
 
 type TableCellFocusPlacement = "start" | "end";
@@ -800,7 +814,7 @@ function focusMarkdownTableCellInput(
 ): void {
   const selector = `.cm-markdown-table-cell-input[data-table-row-kind="${target.rowKind}"][data-table-row-index="${target.rowIndex}"][data-table-cell-index="${target.cellIndex}"]`;
   const focus = () => {
-    const input = view.dom.querySelector<HTMLInputElement>(selector);
+    const input = view.dom.querySelector<HTMLTextAreaElement>(selector);
     if (!input) return;
     input.focus();
     const cursor = placement === "start" ? 0 : input.value.length;
