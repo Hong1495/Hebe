@@ -25,9 +25,9 @@ Hebe is a lightweight, open-source desktop Markdown editor inspired by Typora. R
 
 ## Install
 
-The current release, **v1.2.1**, supports **Apple Silicon Macs running macOS 13 or later**. Intel macOS, Windows and Linux binaries are not provided in this release.
+The current release, **v1.2.2**, supports **Apple Silicon Macs running macOS 13 or later**. Intel macOS, Windows and Linux binaries are not provided in this release.
 
-1. Download `Hebe_1.2.1_aarch64.dmg` from [Releases](https://github.com/Hong1495/Hebe/releases/latest).
+1. Download `Hebe_1.2.2_aarch64.dmg` from [Releases](https://github.com/Hong1495/Hebe/releases/latest).
 2. Open the DMG and drag **Hebe.app** into **Applications**. Launch the installed copy, not the read-only disk image.
 3. This release is ad-hoc signed, without Apple Developer ID signing or notarization. If macOS blocks it, use **System Settings → Privacy & Security → Open Anyway** after reviewing the source and release checksums.
 
