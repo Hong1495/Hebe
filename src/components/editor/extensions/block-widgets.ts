@@ -588,7 +588,9 @@ function makeTableCellInput(
   });
   input.addEventListener("keydown", (event) => {
     event.stopPropagation();
-    if (event.isComposing) return;
+    // WebKit ends composition before delivering the confirmation keydown.
+    // Its legacy 229 code still marks that key as owned by the IME.
+    if (event.isComposing || event.keyCode === 229) return;
 
     const structureEdit = tableStructureEditForKey(event, block, target);
     if (structureEdit) {

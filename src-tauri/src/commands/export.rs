@@ -139,6 +139,14 @@ fn export_sync(
         None
     };
 
+    let pdf_tables = if format == "pdf" {
+        let file = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
+        std::fs::write(file.path(), include_str!("pdf-tables.lua")).map_err(|e| e.to_string())?;
+        Some(file)
+    } else {
+        None
+    };
+
     let pandoc_path = resolve_tool("pandoc").ok_or_else(|| {
         "Pandoc is not installed. Install it from https://pandoc.org/installing.html".to_string()
     })?;
@@ -174,7 +182,22 @@ fn export_sync(
                 .to_string()
         })?;
 
+        let margin = if (10..=40).contains(&options.margin_mm) {
+            options.margin_mm
+        } else {
+            20
+        };
+        let paper_width = if options.paper_size == "letter" {
+            216
+        } else {
+            210
+        };
+        let max_columns = (paper_width - 2 * u16::from(margin)) / 30;
         command
+            .arg("--lua-filter")
+            .arg(pdf_tables.as_ref().unwrap().path())
+            .arg("--metadata")
+            .arg(format!("hebe-pdf-columns={max_columns}"))
             .arg("--include-in-header")
             .arg(pdf_header.as_ref().unwrap().path())
             .arg(format!("--pdf-engine={}", xelatex_path.to_string_lossy()))
@@ -354,6 +377,103 @@ mod tests {
         if let Ok(path) = std::env::var("HEBE_WIDE_PDF_REVIEW_PATH") {
             std::fs::copy(&output, path).unwrap();
         }
+    }
+
+    #[test]
+    fn pdf_wide_tables_keep_every_cell_within_printable_width() {
+        if resolve_tool("pandoc").is_none() || resolve_tool("xelatex").is_none() {
+            return;
+        }
+        let Some(extractor) = resolve_tool("pdftotext") else {
+            return;
+        };
+        let root = tempfile::tempdir().unwrap();
+        let document = root.path().join("tables.md");
+        let output = root.path().join("tables.pdf");
+        let mut content = String::from("# Wide table\n\n");
+        content.push_str(
+            &(1..=16)
+                .map(|n| format!("| Column{n} "))
+                .collect::<String>(),
+        );
+        content.push_str("|\n");
+        content.push_str(&"| --- ".repeat(16));
+        content.push_str("|\n");
+        for row in 1..=3 {
+            for col in 1..=16 {
+                content.push_str(&format!("| R{row}C{col} value "));
+            }
+            content.push_str("|\n");
+        }
+        content.push_str("\n| Key | Long token |\n| --- | --- |\n| ID | ");
+        content.push_str(&"abcdefghij".repeat(30));
+        content.push_str("TOKENEND |\n| Code | `path_with_underscores&percent%and#hash~end` |\n");
+        std::fs::write(&document, &content).unwrap();
+        for (paper, margin, font) in [("a4", 10, 10), ("a4", 40, 12), ("letter", 20, 11)] {
+            export_sync(
+                content.clone(),
+                document.to_string_lossy().into_owned(),
+                "pdf".into(),
+                output.to_string_lossy().into_owned(),
+                Some(ExportOptions {
+                    paper_size: paper.into(),
+                    margin_mm: margin,
+                    font_size: font,
+                    ..ExportOptions::default()
+                }),
+            )
+            .unwrap();
+            let text = std::process::Command::new(&extractor)
+                .arg(&output)
+                .arg("-")
+                .output()
+                .unwrap();
+            assert!(text.status.success());
+            let text = String::from_utf8_lossy(&text.stdout);
+            let compact: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+            for row in 1..=3 {
+                for col in 1..=16 {
+                    assert!(
+                        compact.contains(&format!("R{row}C{col}value")),
+                        "missing cell {row},{col}"
+                    );
+                }
+            }
+            assert!(compact.contains(&format!("{}TOKENEND", "abcdefghij".repeat(30))));
+            assert!(compact.contains("path_with_underscores&percent%and#hash~end"));
+            let bbox = std::process::Command::new(&extractor)
+                .arg("-bbox")
+                .arg(&output)
+                .arg("-")
+                .output()
+                .unwrap();
+            let bbox = String::from_utf8_lossy(&bbox.stdout);
+            let left = f64::from(margin) * 72.0 / 25.4;
+            let page_width = if paper == "letter" { 612.0 } else { 595.28 };
+            for line in bbox.lines().filter(|line| line.contains("<word ")) {
+                let coordinate = |name: &str| -> f64 {
+                    line.split(&format!("{name}=\""))
+                        .nth(1)
+                        .unwrap()
+                        .split('"')
+                        .next()
+                        .unwrap()
+                        .parse()
+                        .unwrap()
+                };
+                assert!(coordinate("xMin") >= left - 1.0, "left overflow: {line}");
+                assert!(
+                    coordinate("xMax") <= page_width - left + 1.0,
+                    "right overflow: {line}"
+                );
+            }
+            if paper == "letter" {
+                if let Ok(path) = std::env::var("HEBE_TABLE_PDF_REVIEW_PATH") {
+                    std::fs::copy(&output, path).unwrap();
+                }
+            }
+        }
+        assert_eq!(std::fs::read_to_string(&document).unwrap(), content);
     }
 
     #[test]
